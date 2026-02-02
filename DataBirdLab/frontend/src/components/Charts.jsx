@@ -50,45 +50,46 @@ const processSpeciesData = (detections) => {
         .slice(0, 5); // Top 5
 };
 
-const COLORS = ['#0d9488', '#0ea5e9', '#f59e0b', '#ef4444', '#8b5cf6'];
+// Ecological Palette (Emerald, Teal, Amber, Sky, Rose)
+const COLORS = ['#10b981', '#14b8a6', '#f59e0b', '#0ea5e9', '#f43f5e'];
 
 export const WeeklyActivityChart = ({ days, visualDetections }) => {
     const data = useMemo(() => processTimelineData(visualDetections, days), [visualDetections, days]);
 
     return (
         <div className="w-full h-full flex flex-col">
-            <h3 className="text-sm font-semibold text-slate-700 px-4 pt-3 mb-2">Activity Trend</h3>
+            <h3 className="text-sm font-semibold text-stone-700 px-4 pt-3 mb-2">Activity Trend</h3>
             <div className="flex-1 min-h-0">
                 <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={data} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
                         <defs>
                             <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#0d9488" stopOpacity={0.1} />
-                                <stop offset="95%" stopColor="#0d9488" stopOpacity={0} />
+                                <stop offset="5%" stopColor="#10b981" stopOpacity={0.1} />
+                                <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                             </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e7e5e4" /> {/* stone-200 */}
                         <XAxis
                             dataKey="date"
                             axisLine={false}
                             tickLine={false}
-                            tick={{ fill: '#94a3b8', fontSize: 10 }}
+                            tick={{ fill: '#78716c', fontSize: 10 }} // stone-500
                             dy={5}
                         />
                         <YAxis
                             axisLine={false}
                             tickLine={false}
-                            tick={{ fill: '#94a3b8', fontSize: 10 }}
+                            tick={{ fill: '#78716c', fontSize: 10 }} // stone-500
                         />
                         <Tooltip
-                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                            itemStyle={{ color: '#0f172a', fontSize: '12px', fontWeight: 'bold' }}
-                            labelStyle={{ color: '#64748b', fontSize: '11px', marginBottom: '4px' }}
+                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                            itemStyle={{ color: '#1c1917', fontSize: '12px', fontWeight: 'bold' }} // stone-900
+                            labelStyle={{ color: '#a8a29e', fontSize: '11px', marginBottom: '4px' }} // stone-400
                         />
                         <Area
                             type="monotone"
                             dataKey="count"
-                            stroke="#0d9488"
+                            stroke="#10b981" // Emerald
                             strokeWidth={2}
                             fillOpacity={1}
                             fill="url(#colorCount)"
@@ -104,8 +105,9 @@ export const SpeciesDistributionChart = ({ visualDetections }) => {
     const data = useMemo(() => processSpeciesData(visualDetections), [visualDetections]);
 
     return (
+
         <div className="w-full h-full flex flex-col">
-            <h3 className="text-sm font-semibold text-slate-700 px-4 pt-3 mb-2">Species Distribution</h3>
+            <h3 className="text-sm font-semibold text-stone-700 px-4 pt-3 mb-2">Species Distribution</h3>
             <div className="flex-1 min-h-0 flex items-center justify-center">
                 {data.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%">
@@ -122,22 +124,23 @@ export const SpeciesDistributionChart = ({ visualDetections }) => {
                                 ))}
                             </Pie>
                             <Tooltip
-                                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                itemStyle={{ color: '#0f172a', fontSize: '12px' }}
+                                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                itemStyle={{ color: '#1c1917', fontSize: '12px' }}
                             />
                             <Legend
                                 layout="vertical"
                                 verticalAlign="middle"
                                 align="right"
                                 iconSize={8}
-                                wrapperStyle={{ fontSize: '11px', color: '#64748b' }}
+                                wrapperStyle={{ fontSize: '11px', color: '#78716c' }} // stone-500
                             />
                         </PieChart>
                     </ResponsiveContainer>
                 ) : (
-                    <div className="text-slate-400 text-xs text-center">No data available</div>
+                    <div className="text-stone-400 text-xs text-center">No data available</div>
                 )}
             </div>
         </div>
     );
+
 };

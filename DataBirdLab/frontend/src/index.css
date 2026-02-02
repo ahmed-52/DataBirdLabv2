@@ -1,70 +1,198 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&family=Inter:wght@400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  background-color: #E7E7E7;
-  color: #0f172a;
+@layer base {
+  :root {
+    /* Enterprise Scientific / Field Telemetry Theme */
+    /* Base: Zinc (Neutral, Matte) */
+    --background: 240 5% 98%;
+    /* Zinc 50 */
+    --foreground: 240 10% 3.9%;
+    /* Zinc 950 */
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+
+    /* Primary: Signal Teal (Technical, Distinct) */
+    --primary: 175 57% 26%;
+    /* Teal 800 */
+    --primary-foreground: 0 0% 98%;
+
+    --secondary: 240 4.8% 95.9%;
+    /* Zinc 100 */
+    --secondary-foreground: 240 5.9% 10%;
+
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 5.9% 90%;
+    /* Zinc 200 - CRISP BORDERS */
+    --input: 240 5.9% 90%;
+    --ring: 175 57% 26%;
+
+    /* Radius: Tight/Technical */
+    --radius: 0.25rem;
+
+    --chart-1: 173 58% 39%;
+    --chart-2: 27 87% 67%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+
+    --sidebar-background: 240 5% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 175 57% 26%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 175 57% 26%;
+  }
+
+  .dark {
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
 }
 
-body {
-  margin: 0;
-  font-family: 'Noto Sans', sans-serif;
-  background-color: #E7E7E7;
-  min-height: 100vh;
-  overflow-x: hidden;
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Noto Sans', sans-serif;
+    margin: 0;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
 }
 
-/* Glassmorphism / Shadcn-like Utilities for Light Mode */
+/* Enterprise Scientific Utilities */
+
+/* Depth Strategy: Borders Only */
+.tech-border {
+  @apply border border-border bg-white shadow-none;
+}
+
+.tech-panel {
+  @apply bg-white border border-border shadow-none rounded-lg;
+}
+
+.tech-card {
+  @apply bg-white border border-border shadow-none transition-colors hover:border-slate-400;
+}
+
+.tech-header {
+  @apply bg-white border-b border-border;
+}
+
+/* Font Utilities */
+.font-display {
+  font-family: 'Outfit', sans-serif;
+}
+
+.font-data {
+  font-family: 'JetBrains Mono', monospace;
+  font-feature-settings: "zero" 1;
+}
+
+/* Premium Glass & card effects */
 .glass-panel {
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.05),
+    0 2px 4px -1px rgba(0, 0, 0, 0.03),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
 .glass-card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  /* slate-200 */
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-  /* Subtle shadow */
-  transition: all 0.3s ease;
+  background: white;
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .glass-card:hover {
-  background: #ffffff;
-  border-color: #cbd5e1;
-  /* slate-300 */
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
   transform: translateY(-2px);
+  box-shadow:
+    0 12px 24px -8px rgba(0, 0, 0, 0.08),
+    0 4px 8px -4px rgba(0, 0, 0, 0.04);
+  border-color: hsl(var(--primary) / 0.3);
 }
 
-.text-gradient {
+/* Text Gradients */
+.text-gradient-emerald {
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  background-image: linear-gradient(to right, #F2994A, #F2C94C);
+  background-image: linear-gradient(135deg, hsl(var(--primary)), #059669);
+  /* Emerald to Teal */
 }
 
-/* Scrollbar */
+.text-gradient-gold {
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-image: linear-gradient(135deg, #d97706, #fbbf24);
+  /* Amber 600 to 400 */
+}
+
+/* Animations */
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.4s ease-out forwards;
+}
+
+/* Scrollbar: Slim & Technical */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #E7E7E7;
+  background: hsl(var(--secondary));
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 4px;
+  background: hsl(var(--muted-foreground) / 0.3);
+  border: 2px solid hsl(var(--secondary));
+  border-radius: 0;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: hsl(var(--muted-foreground) / 0.5);
 }

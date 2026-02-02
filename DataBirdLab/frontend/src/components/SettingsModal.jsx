@@ -102,71 +102,75 @@ const SettingsModal = ({ isOpen, onClose }) => {
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-6 m-4 relative animate-in fade-in zoom-in duration-200 overflow-y-auto max-h-[90vh]">
-                <button
-                    onClick={onClose}
-                    className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors"
-                >
-                    <X size={20} />
-                </button>
-
-                <div className="flex items-center gap-3 mb-6">
-                    <div className="bg-slate-100 p-2 rounded-lg">
-                        <Settings className="text-slate-700" size={24} />
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
+            <div className="bg-white border border-zinc-300 shadow-none rounded-lg w-full max-w-2xl m-4 relative animate-in fade-in zoom-in duration-100 overflow-y-auto max-h-[90vh]">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-200">
+                    <div className="flex items-center gap-3">
+                        <div className="bg-zinc-100 p-2 rounded-sm border border-zinc-200">
+                            <Settings className="text-zinc-700" size={18} />
+                        </div>
+                        <div>
+                            <h2 className="text-lg font-bold text-zinc-900 font-display uppercase tracking-tight">System Configuration</h2>
+                            <p className="text-xs text-zinc-500 font-mono mt-0.5">PIPELINE_PARAMS // MODEL_REGISTRY</p>
+                        </div>
                     </div>
-                    <div>
-                        <h2 className="text-xl font-bold text-slate-800">System Settings</h2>
-                        <p className="text-slate-500 text-sm">Configure pipeline parameters and models.</p>
-                    </div>
+                    <button
+                        onClick={onClose}
+                        className="text-zinc-400 hover:text-zinc-600 transition-colors"
+                    >
+                        <X size={18} />
+                    </button>
                 </div>
 
                 {loading ? (
                     <div className="flex justify-center p-8">
-                        <Loader2 className="animate-spin text-slate-400" size={24} />
+                        <Loader2 className="animate-spin text-zinc-400" size={24} />
                     </div>
                 ) : (
-                    <form onSubmit={handleSaveSettings} className="space-y-6">
+                    <form onSubmit={handleSaveSettings} className="p-6 space-y-8">
 
                         {/* Pipeline Parameters */}
-                        <div className="space-y-4 border-b border-slate-100 pb-6">
-                            <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider">Pipeline Parameters</h3>
+                        <div className="space-y-4">
+                            <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest border-b border-zinc-100 pb-2">Analysis Pipeline</h3>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Min Confidence</label>
-                                    <input
-                                        type="number"
-                                        step="0.01"
-                                        min="0"
-                                        max="1"
-                                        value={minConfidence}
-                                        onChange={(e) => setMinConfidence(e.target.value)}
-                                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500/50"
-                                    />
-                                    <p className="text-xs text-slate-400 mt-1">Threshold for detections (0.0 - 1.0)</p>
+                                    <label className="block text-xs font-bold text-zinc-700 mb-1.5 uppercase font-mono">Detection Confidence</label>
+                                    <div className="relative">
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            max="1"
+                                            value={minConfidence}
+                                            onChange={(e) => setMinConfidence(e.target.value)}
+                                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 rounded-sm focus:outline-none focus:border-primary text-zinc-900 text-sm font-mono focus:ring-1 focus:ring-primary"
+                                        />
+                                        <div className="absolute right-3 top-2.5 text-[10px] text-zinc-400 font-mono">THRESHOLD</div>
+                                    </div>
+                                    <p className="text-[10px] text-zinc-400 mt-1 font-mono">RANGE: 0.0 - 1.0 (DEFAULT: 0.25)</p>
                                 </div>
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Default Latitude</label>
+                                    <label className="block text-xs font-bold text-zinc-700 mb-1.5 uppercase font-mono">Default Latitude</label>
                                     <input
                                         type="number"
                                         step="any"
                                         value={defaultLat}
                                         onChange={(e) => setDefaultLat(e.target.value)}
-                                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500/50"
+                                        className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 rounded-sm focus:outline-none focus:border-primary text-zinc-900 text-sm font-mono focus:ring-1 focus:ring-primary"
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Default Longitude</label>
+                                    <label className="block text-xs font-bold text-zinc-700 mb-1.5 uppercase font-mono">Default Longitude</label>
                                     <input
                                         type="number"
                                         step="any"
                                         value={defaultLon}
                                         onChange={(e) => setDefaultLon(e.target.value)}
-                                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500/50"
+                                        className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 rounded-sm focus:outline-none focus:border-primary text-zinc-900 text-sm font-mono focus:ring-1 focus:ring-primary"
                                     />
                                 </div>
                             </div>
@@ -174,13 +178,13 @@ const SettingsModal = ({ isOpen, onClose }) => {
 
                         {/* Model Management */}
                         <div className="space-y-4">
-                            <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider">Model Management</h3>
+                            <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest border-b border-zinc-100 pb-2">Inference Engines</h3>
 
                             {/* Acoustic Model */}
-                            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
-                                <label className="block text-sm font-medium text-slate-800 mb-2 flex items-center gap-2">
-                                    <FileCode size={16} className="text-orange-600" />
-                                    Acoustic Model Override
+                            <div className="bg-zinc-50 border border-zinc-200 rounded-sm p-4">
+                                <label className="block text-xs font-bold text-zinc-700 mb-2 flex items-center gap-2 uppercase font-mono">
+                                    <FileCode size={14} className="text-primary" />
+                                    Acoustic Classifier Override
                                 </label>
                                 <div className="flex items-center gap-4">
                                     <div className="flex-1">
@@ -188,18 +192,18 @@ const SettingsModal = ({ isOpen, onClose }) => {
                                             type="file"
                                             accept=".tflite,.pt,.onnx"
                                             onChange={(e) => setAcousticModel(e.target.files[0])}
-                                            className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100"
+                                            className="block w-full text-xs text-zinc-500 font-mono file:mr-4 file:py-2 file:px-4 file:rounded-sm file:border-0 file:text-xs file:font-bold file:uppercase file:bg-zinc-200 file:text-zinc-700 hover:file:bg-zinc-300"
                                         />
                                     </div>
                                 </div>
-                                <p className="text-xs text-slate-500 mt-2">Upload a custom BirdNET classifier (e.g., custom_model.tflite). Leave empty to keep current.</p>
+                                <p className="text-[10px] text-zinc-400 mt-2 font-mono">TARGET: BirdNET Custom Classifier (.tflite)</p>
                             </div>
 
                             {/* Visual Model */}
-                            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
-                                <label className="block text-sm font-medium text-slate-800 mb-2 flex items-center gap-2">
-                                    <FileCode size={16} className="text-teal-600" />
-                                    Visual Model Override
+                            <div className="bg-zinc-50 border border-zinc-200 rounded-sm p-4">
+                                <label className="block text-xs font-bold text-zinc-700 mb-2 flex items-center gap-2 uppercase font-mono">
+                                    <FileCode size={14} className="text-primary" />
+                                    Visual Object Detector Override
                                 </label>
                                 <div className="flex items-center gap-4">
                                     <div className="flex-1">
@@ -207,11 +211,11 @@ const SettingsModal = ({ isOpen, onClose }) => {
                                             type="file"
                                             accept=".pt,.onnx"
                                             onChange={(e) => setVisualModel(e.target.files[0])}
-                                            className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100"
+                                            className="block w-full text-xs text-zinc-500 font-mono file:mr-4 file:py-2 file:px-4 file:rounded-sm file:border-0 file:text-xs file:font-bold file:uppercase file:bg-zinc-200 file:text-zinc-700 hover:file:bg-zinc-300"
                                         />
                                     </div>
                                 </div>
-                                <p className="text-xs text-slate-500 mt-2">Upload a custom YOLO model (e.g., best.pt). Leave empty to keep current.</p>
+                                <p className="text-[10px] text-zinc-400 mt-2 font-mono">TARGET: YOLOv8 Custom Weights (.pt)</p>
                             </div>
                         </div>
 
@@ -220,36 +224,36 @@ const SettingsModal = ({ isOpen, onClose }) => {
 
                         {/* Status Message */}
                         {message && (
-                            <div className={`text-sm px-4 py-3 rounded-lg flex items-center gap-2 ${message.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                            <div className={`text-xs font-mono px-4 py-3 rounded-sm flex items-center gap-2 border ${message.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'
                                 }`}>
-                                {message.type === 'error' && <AlertTriangle size={16} />}
+                                {message.type === 'error' && <AlertTriangle size={14} />}
                                 {message.text}
                             </div>
                         )}
 
                         {/* Actions */}
-                        <div className="pt-4 flex justify-end gap-3">
+                        <div className="pt-4 border-t border-zinc-200 flex justify-end gap-3">
                             <button
                                 type="button"
                                 onClick={onClose}
-                                className="px-4 py-2 text-slate-600 hover:bg-slate-100 font-medium rounded-lg transition-colors"
+                                className="px-4 py-2 text-zinc-600 hover:bg-zinc-100 font-bold uppercase text-xs rounded-sm transition-colors border border-transparent"
                             >
                                 Cancel
                             </button>
                             <button
                                 type="submit"
                                 disabled={uploading}
-                                className="px-6 py-2 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-lg shadow-lg shadow-slate-900/10 transition-all flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                                className="px-6 py-2 bg-zinc-900 hover:bg-zinc-800 text-white font-bold uppercase text-xs rounded-sm shadow-none transition-all flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed border border-zinc-900"
                             >
                                 {uploading ? (
                                     <>
-                                        <Loader2 className="animate-spin" size={16} />
-                                        Saving...
+                                        <Loader2 className="animate-spin" size={14} />
+                                        SAVING_CONFIG...
                                     </>
                                 ) : (
                                     <>
-                                        <Save size={16} />
-                                        Save Changes
+                                        <Save size={14} />
+                                        COMMIT_CHANGES
                                     </>
                                 )}
                             </button>
@@ -330,63 +334,64 @@ const SpeciesColorMapping = () => {
     };
 
     const colorLabels = {
-        white: { label: 'White Birds', bg: 'bg-slate-100', text: 'text-slate-700', border: 'border-slate-300' },
-        black: { label: 'Black Birds', bg: 'bg-slate-800', text: 'text-white', border: 'border-slate-600' },
-        brown: { label: 'Brown Birds', bg: 'bg-amber-100', text: 'text-amber-800', border: 'border-amber-300' },
-        grey: { label: 'Grey Birds', bg: 'bg-gray-200', text: 'text-gray-700', border: 'border-gray-400' }
+        white: { label: 'Class: White', bg: 'bg-zinc-100', text: 'text-zinc-700', border: 'border-zinc-200' },
+        black: { label: 'Class: Black', bg: 'bg-zinc-800', text: 'text-white', border: 'border-zinc-700' },
+        brown: { label: 'Class: Brown', bg: 'bg-amber-100', text: 'text-amber-900', border: 'border-amber-200' },
+        grey: { label: 'Class: Grey', bg: 'bg-zinc-200', text: 'text-zinc-800', border: 'border-zinc-300' }
     };
 
-    if (loading) return <div className="text-sm text-slate-400 py-4">Loading species mapping...</div>;
+    if (loading) return <div className="text-xs font-mono text-zinc-400 py-4">LOADING_MAPPING_MATRIX...</div>;
 
     return (
-        <div className="space-y-4 border-t border-slate-100 pt-6">
-            <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider">Species Color Mapping</h3>
+        <div className="space-y-4 pt-6">
+            <div className="flex items-center justify-between border-b border-zinc-100 pb-2">
+                <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Fusion Taxonomy Mapping</h3>
                 <button
                     type="button"
                     onClick={handleSave}
                     disabled={saving}
-                    className="text-xs px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full font-medium hover:bg-indigo-100 disabled:opacity-50"
+                    className="text-[10px] px-3 py-1 bg-zinc-100 text-zinc-700 border border-zinc-200 rounded-sm font-bold uppercase hover:bg-zinc-200 disabled:opacity-50"
                 >
-                    {saving ? 'Saving...' : 'Save Mapping'}
+                    {saving ? 'SAVING...' : 'SAVE_TAXONOMY'}
                 </button>
             </div>
-            <p className="text-xs text-slate-500">
-                Map audio species to drone color classes for fusion inference.
-            </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {Object.entries(colorLabels).map(([color, style]) => (
-                    <div key={color} className={`p-3 rounded-lg border ${style.border} bg-white`}>
-                        <div className={`text-xs font-bold uppercase tracking-wider mb-2 ${style.text}`}>
-                            {style.label}
+                    <div key={color} className={`p-3 rounded-sm border ${style.border} bg-white`}>
+                        <div className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${style.text === 'text-white' ? 'text-zinc-900' : style.text} flex items-center justify-between`}>
+                            <span>{style.label}</span>
+                            <div className={`w-3 h-3 rounded-full border border-black/10 ${style.bg}`}></div>
                         </div>
-                        <div className="flex flex-wrap gap-1 mb-2 min-h-[32px]">
+                        <div className="flex flex-wrap gap-1 mb-2 min-h-[32px] bg-zinc-50/50 p-2 rounded-sm border border-zinc-100">
                             {mapping[color].map(sp => (
                                 <span
                                     key={sp}
-                                    className={`px-2 py-0.5 text-xs rounded-full ${style.bg} ${style.text} cursor-pointer hover:opacity-70`}
+                                    className={`px-2 py-0.5 text-[10px] font-mono rounded-sm border ${style.border} ${style.bg} ${style.text} cursor-pointer hover:opacity-70 flex items-center gap-1`}
                                     onClick={() => handleRemoveSpecies(color, sp)}
-                                    title="Click to remove"
+                                    title="REMOVE_NODE"
                                 >
-                                    {sp} ×
+                                    {sp} <span className="opacity-50">×</span>
                                 </span>
                             ))}
+                            {mapping[color].length === 0 && (
+                                <span className="text-[10px] text-zinc-300 font-mono italic">NO_DATA_NODES</span>
+                            )}
                         </div>
 
                         <div className="flex gap-1">
                             <input
                                 type="text"
-                                placeholder="Add species..."
+                                placeholder={`ADD_SPECIES...`}
                                 value={newSpecies[color]}
                                 onChange={(e) => setNewSpecies(prev => ({ ...prev, [color]: e.target.value }))}
                                 onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddSpecies(color))}
-                                className="flex-1 px-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                className="flex-1 px-2 py-1 text-xs font-mono bg-white border border-zinc-200 rounded-sm focus:outline-none focus:border-primary"
                             />
                             <button
                                 type="button"
                                 onClick={() => handleAddSpecies(color)}
-                                className="px-2 py-1 text-xs bg-slate-100 text-slate-600 rounded hover:bg-slate-200"
+                                className="px-2 py-1 text-xs bg-zinc-100 text-zinc-600 border border-zinc-200 rounded-sm hover:bg-zinc-200"
                             >
                                 +
                             </button>

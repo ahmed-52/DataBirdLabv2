@@ -19,7 +19,12 @@ class Survey(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     date: datetime = Field(default_factory=datetime.now)
-    type: str
+    type: str # 'drone' or 'acoustic'
+    
+    # Status tracking
+    status: str = Field(default="pending") # pending, processing, completed, failed
+    error_message: Optional[str] = None
+    
     media: List["MediaAsset"] = Relationship(back_populates="survey")
 
 
@@ -41,6 +46,11 @@ class MediaAsset(SQLModel, table=True):
     aru_id: Optional[int] = Field(default=None, foreign_key="aru.id")
 
     is_processed: bool = False
+    
+    # Granular status
+    status: str = Field(default="pending")
+    error_message: Optional[str] = None
+    
     is_validated: bool = False  
 
     # Relationships

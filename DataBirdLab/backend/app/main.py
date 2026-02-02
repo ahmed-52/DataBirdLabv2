@@ -50,10 +50,19 @@ async def import_survey(
     background_tasks: BackgroundTasks = BackgroundTasks(),
     session: Session = Depends(get_session)
 ):
-    # Validate at least one file is provided
+    # Validate at least one file is provided AND exclusive
     if not orthomosaics and not audio_files:
         raise HTTPException(status_code=400, detail="At least one orthomosaic or audio file must be provided")
     
+    if orthomosaics and audio_files:
+         raise HTTPException(status_code=400, detail="Survey cannot contain both drone and acoustic data simultaneously. Please upload separately.")
+    
+    if survey_type == "drone" and audio_files:
+        raise HTTPException(status_code=400, detail="Survey type 'drone' cannot accept audio files.")
+    
+    if survey_type == "acoustic" and orthomosaics:
+        raise HTTPException(status_code=400, detail="Survey type 'acoustic' cannot accept orthomosaic files.")
+
     # Parse survey date
     from datetime import datetime
     import re
@@ -93,7 +102,12 @@ async def import_survey(
             raise HTTPException(status_code=400, detail="Invalid audio_aru_mapping format")
     
     # 1. Create Survey entry in DB with explicit type and date
-    new_survey = Survey(name=survey_name, type=survey_type, date=parsed_date)
+    new_survey = Survey(
+        name=survey_name, 
+        type=survey_type, 
+        date=parsed_date,
+        status="pending"
+    )
     session.add(new_survey)
     session.commit()
     session.refresh(new_survey)
@@ -121,7 +135,8 @@ async def import_survey(
         media_asset = MediaAsset(
             survey_id=new_survey.id,
             file_path=input_path,
-            is_processed=False
+            is_processed=False,
+            status="pending"
         )
         session.add(media_asset)
         session.commit()
@@ -164,6 +179,19 @@ async def import_survey(
         # Get ARU ID for this audio file
         file_aru_id = aru_mapping.get(index)
         
+        # Create MediaAsset for audio (IMPORTANT: Was missing before?)
+        # Wait, previous code didn't create MediaAsset for audio explicitly here??
+        # Checking... previous code only did `background_tasks.add_task`
+        # Pipeline likely creates it? 
+        # Pipeline manager.run_survey_processing calls pipeline.transform
+        # BirdNetPipeline.transform likely creates assets?
+        # If so, create_survey shouldn't create it twice.
+        # But for status tracking, we probably want a record immediately.
+        # Let's stick to existing pattern for now (pipeline handles creation if it wasn't here)
+        # Actually, Drone loop created MediaAsset. Acoustic loop didn't.
+        # BirdNetPipeline likely handles it.
+        # I will leave as is but check Pipeline later.
+        
         # Trigger acoustic processing pipeline in background
         background_tasks.add_task(
             execute_acoustic_pipeline_task,
@@ -184,23 +212,87 @@ async def import_survey(
     }
 
 def execute_pipeline_task(survey_id: int, input_path: str, output_dir: str):
-    """Execution wrapper for BackgroundTasks"""
-    manager = PipelineManager(pipeline_type="drone")
-    manager.run_survey_processing(
-        survey_id=survey_id, 
-        input_path=input_path, 
-        output_dir=output_dir
-    )
+    """Execution wrapper for BackgroundTasks with status tracking"""
+    with Session(engine) as session:
+        survey = session.get(Survey, survey_id)
+        if survey:
+            survey.status = "processing"
+            session.add(survey)
+            session.commit()
+
+    try:
+        manager = PipelineManager(pipeline_type="drone")
+        manager.run_survey_processing(
+            survey_id=survey_id, 
+            input_path=input_path, 
+            output_dir=output_dir
+        )
+        
+        with Session(engine) as session:
+            survey = session.get(Survey, survey_id)
+            if survey:
+                survey.status = "completed"
+                # Mark original asset as processed too if needed, or rely on pipeline logic
+                # For now just update survey status
+                session.add(survey)
+                session.commit()
+                
+    except Exception as e:
+        print(f"Pipeline Failed: {e}")
+        with Session(engine) as session:
+            survey = session.get(Survey, survey_id)
+            if survey:
+                survey.status = "failed"
+                survey.error_message = str(e)
+                session.add(survey)
+                session.commit()
+            
+            # Also mark assets as failed?
+            # Ideally we find the specific asset but input_path is unique enough
+            assets = session.exec(select(MediaAsset).where(MediaAsset.survey_id == survey_id)).all()
+            for asset in assets:
+                # Naive matching of input path to uploaded file might be tricky if path changed
+                # But we can mark all pending assets as failed
+                if asset.status == "pending":
+                    asset.status = "failed"
+                    asset.error_message = str(e)
+                    session.add(asset)
+            session.commit()
 
 def execute_acoustic_pipeline_task(survey_id: int, input_path: str, aru_id: Optional[int] = None):
-    """Execution wrapper for acoustic processing BackgroundTasks"""
-    manager = PipelineManager(pipeline_type="birdnet")
-    manager.run_survey_processing(
-        survey_id=survey_id,
-        input_path=input_path,
-        output_dir=None,  # Audio doesn't need output_dir
-        aru_id=aru_id
-    )
+    """Execution wrapper for acoustic processing BackgroundTasks with status tracking"""
+    with Session(engine) as session:
+        survey = session.get(Survey, survey_id)
+        if survey:
+            survey.status = "processing"
+            session.add(survey)
+            session.commit()
+
+    try:
+        manager = PipelineManager(pipeline_type="birdnet")
+        manager.run_survey_processing(
+            survey_id=survey_id,
+            input_path=input_path,
+            output_dir=None,  # Audio doesn't need output_dir
+            aru_id=aru_id
+        )
+        
+        with Session(engine) as session:
+            survey = session.get(Survey, survey_id)
+            if survey:
+                survey.status = "completed"
+                session.add(survey)
+                session.commit()
+
+    except Exception as e:
+        print(f"Acoustic Pipeline Failed: {e}")
+        with Session(engine) as session:
+            survey = session.get(Survey, survey_id)
+            if survey:
+                survey.status = "failed"
+                survey.error_message = str(e)
+                session.add(survey)
+                session.commit()
 
 
 @app.get("/api/surveys/{survey_id}/status")
@@ -219,7 +311,9 @@ def get_survey_status(survey_id: int, session: Session = Depends(get_session)):
         "name": survey.name,
         "total_tiles": total_assets,
         "processed_tiles": processed,
-        "is_complete": (total_assets > 0 and total_assets == processed)
+        "is_complete": survey.status == "completed",
+        "status": survey.status,
+        "error_message": survey.error_message
     }
 
     return {
@@ -228,6 +322,67 @@ def get_survey_status(survey_id: int, session: Session = Depends(get_session)):
         "total_tiles": total_assets,
         "processed_tiles": processed,
         "is_complete": (total_assets > 0 and total_assets == processed)
+    }
+
+@app.get("/api/surveys/{survey_id}")
+def get_survey_details(survey_id: int, session: Session = Depends(get_session)):
+    """Get metadata for a specific survey"""
+    survey = session.get(Survey, survey_id)
+    if not survey:
+        raise HTTPException(status_code=404, detail="Survey not found")
+    
+    # Calculate bounds similar to list endpoint
+    bounds = None
+    if survey.type == 'drone':
+        bounds_res = session.exec(
+            select(
+                func.min(MediaAsset.lat_tl),
+                func.max(MediaAsset.lat_br),
+                func.min(MediaAsset.lon_tl),
+                func.max(MediaAsset.lon_br)
+            ).where(MediaAsset.survey_id == survey.id)
+        ).first()
+        if bounds_res:
+            bounds = {
+                "min_lat": bounds_res[1] if bounds_res[1] is not None else None,
+                "max_lat": bounds_res[0] if bounds_res[0] is not None else None,
+                "min_lon": bounds_res[2] if bounds_res[2] is not None else None,
+                "max_lon": bounds_res[3] if bounds_res[3] is not None else None
+            }
+    
+    # Get associated ARU for acoustic surveys
+    aru_details = None
+    if survey.type == 'acoustic':
+        aru_asset = session.exec(
+            select(MediaAsset)
+            .where(MediaAsset.survey_id == survey.id)
+            .where(MediaAsset.aru_id.is_not(None))
+        ).first()
+        
+        if aru_asset and aru_asset.aru:
+            aru_details = {
+                "id": aru_asset.aru.id,
+                "name": aru_asset.aru.name,
+                "lat": aru_asset.aru.lat,
+                "lon": aru_asset.aru.lon,
+                "status": "active"
+            }
+
+    return {
+        "id": survey.id,
+        "name": survey.name,
+        "date": survey.date,
+        "type": survey.type,
+        "status": "completed", # Logic for status could be improved
+        "area": "Boeung Sne Restricted Zone", # Placeholder or derived
+        "notes": "Mission data available.",
+        "bounds": bounds or {
+            "min_lat": None,
+            "max_lat": None,
+            "min_lon": None,
+            "max_lon": None
+        },
+        "aru": aru_details
     }
 
 

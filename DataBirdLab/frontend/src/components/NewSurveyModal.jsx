@@ -192,50 +192,53 @@ const NewSurveyModal = ({ isOpen, onClose, onUploadComplete }) => {
     };
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl p-6 m-4 relative animate-in fade-in zoom-in duration-200 max-h-[90vh] overflow-y-auto">
-                <button
-                    onClick={onClose}
-                    className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors"
-                >
-                    <X size={20} />
-                </button>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
+            <div className="bg-white border border-zinc-300 shadow-none rounded-lg w-full max-w-3xl m-4 relative animate-in fade-in zoom-in duration-100 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-200">
+                    <div>
+                        <h2 className="text-lg font-bold text-zinc-900 font-display uppercase tracking-tight">Ingest Survey Data</h2>
+                        <p className="text-xs text-zinc-500 font-mono mt-0.5">MANUAL UPLOAD PROTOCOL</p>
+                    </div>
+                    <button
+                        onClick={onClose}
+                        className="text-zinc-400 hover:text-zinc-600 transition-colors"
+                    >
+                        <X size={18} />
+                    </button>
+                </div>
 
-                <h2 className="text-xl font-bold text-slate-800 mb-1">New Survey Import</h2>
-                <p className="text-slate-500 text-sm mb-6">Upload orthomosaics and audio files for analysis.</p>
-
-                <form onSubmit={handleSubmit} className="space-y-5">
+                <form onSubmit={handleSubmit} className="p-6 space-y-6">
                     {/* Survey Name */}
                     <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Survey Name</label>
+                        <label className="block text-xs font-bold text-zinc-600 mb-1.5 uppercase tracking-wide">Survey Identifier</label>
                         <input
                             type="text"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
-                            placeholder="e.g. Boeung Sne - Zone 2"
-                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500/50 transition-all text-slate-800"
+                            placeholder="e.g. SNE_ZONE2_2026_Q1"
+                            className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 rounded-sm focus:outline-none focus:border-primary text-zinc-900 text-sm font-mono placeholder:text-zinc-400 focus:ring-1 focus:ring-primary"
                         />
                     </div>
 
                     {/* Survey Type Selector */}
                     <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">Survey Type</label>
-                        <div className="flex bg-slate-100 p-1 rounded-lg">
+                        <label className="block text-xs font-bold text-zinc-600 mb-1.5 uppercase tracking-wide">Data Source Type</label>
+                        <div className="grid grid-cols-2 gap-4">
                             <button
                                 type="button"
                                 onClick={() => setSurveyType('drone')}
-                                className={`flex-1 px-4 py-2 text-sm font-semibold rounded-md transition-all flex items-center justify-center gap-2 ${surveyType === 'drone' ? 'bg-teal-500 text-white shadow-sm' : 'text-slate-600 hover:text-slate-800'}`}
+                                className={`px-4 py-3 rounded-sm border transition-all flex items-center justify-center gap-2 ${surveyType === 'drone' ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-white text-zinc-600 border-zinc-200 hover:border-zinc-300'}`}
                             >
                                 <Image size={16} />
-                                Drone Survey
+                                <span className="text-sm font-medium">Aerial / Orthomosaic</span>
                             </button>
                             <button
                                 type="button"
                                 onClick={() => setSurveyType('acoustic')}
-                                className={`flex-1 px-4 py-2 text-sm font-semibold rounded-md transition-all flex items-center justify-center gap-2 ${surveyType === 'acoustic' ? 'bg-orange-500 text-white shadow-sm' : 'text-slate-600 hover:text-slate-800'}`}
+                                className={`px-4 py-3 rounded-sm border transition-all flex items-center justify-center gap-2 ${surveyType === 'acoustic' ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-white text-zinc-600 border-zinc-200 hover:border-zinc-300'}`}
                             >
                                 <FileAudio size={16} />
-                                Acoustic Survey
+                                <span className="text-sm font-medium">Bioacoustic Array</span>
                             </button>
                         </div>
                     </div>
@@ -243,32 +246,35 @@ const NewSurveyModal = ({ isOpen, onClose, onUploadComplete }) => {
                     {/* Survey Date - Only show for drone surveys */}
                     {surveyType === 'drone' && (
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Survey Date</label>
+                            <label className="block text-xs font-bold text-zinc-600 mb-1.5 uppercase tracking-wide">Acquisition Date</label>
                             <input
                                 type="date"
                                 value={surveyDate}
                                 onChange={(e) => setSurveyDate(e.target.value)}
-                                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500/50 transition-all text-slate-800"
+                                className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 rounded-sm focus:outline-none focus:border-primary text-zinc-900 text-sm font-mono focus:ring-1 focus:ring-primary"
                             />
-                            <p className="text-xs text-slate-400 mt-1">Leave blank to use today's date</p>
+                            <p className="text-[10px] text-zinc-400 mt-1 font-mono">DEFAULT: CURRENT_DATE</p>
                         </div>
                     )}
 
                     {/* Acoustic Date Note */}
                     {surveyType === 'acoustic' && (
-                        <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-sm text-orange-700">
-                            📅 <strong>Date will be extracted automatically</strong> from audio filenames (e.g., YYYYMMDD format)
+                        <div className="bg-amber-50 border border-amber-200 rounded-sm p-3 flex items-start gap-2">
+                            <div className="mt-0.5 text-amber-600 text-xs font-mono font-bold">WARNING:</div>
+                            <div className="text-xs text-amber-900">
+                                Date metadata extracted from filenames (Format: YYYYMMDD). Ensure strict naming compliance.
+                            </div>
                         </div>
                     )}
 
                     {/* Conditional File Upload Sections */}
                     {surveyType === 'drone' && (
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
-                                <Image size={16} className="text-teal-600" />
-                                Orthomosaic Files (.tif, .tiff)
+                            <label className="block text-xs font-bold text-zinc-600 mb-1.5 uppercase tracking-wide flex items-center gap-2">
+                                <Image size={14} className="text-primary" />
+                                Payload: Orthomosaic (.tif)
                             </label>
-                            <div className="border-2 border-dashed border-slate-200 rounded-lg p-4 flex flex-col items-center justify-center text-center hover:bg-slate-50 transition-colors cursor-pointer relative group">
+                            <div className="border border-dashed border-zinc-300 rounded-sm p-6 flex flex-col items-center justify-center text-center hover:bg-zinc-50 transition-colors cursor-pointer relative group bg-zinc-50/30">
                                 <input
                                     type="file"
                                     accept=".tif,.tiff"
@@ -276,26 +282,26 @@ const NewSurveyModal = ({ isOpen, onClose, onUploadComplete }) => {
                                     onChange={handleOrthomosaicChange}
                                     className="absolute inset-0 opacity-0 cursor-pointer"
                                 />
-                                <Upload className="text-slate-400 mb-2 group-hover:text-teal-600 transition-colors" size={24} />
-                                <span className="text-sm text-slate-500">Click to browse or drag orthomosaics here</span>
+                                <Upload className="text-zinc-400 mb-2 group-hover:text-primary transition-colors" size={20} />
+                                <span className="text-xs font-mono text-zinc-500">DRAG_DROP_ALIGNED_TIFF</span>
                             </div>
 
                             {/* Orthomosaic File List */}
                             {orthomosaicFiles.length > 0 && (
                                 <div className="mt-3 space-y-2">
                                     {orthomosaicFiles.map((file, index) => (
-                                        <div key={index} className="flex items-center justify-between bg-teal-50 border border-teal-200 rounded-lg p-2 px-3">
+                                        <div key={index} className="flex items-center justify-between bg-zinc-50 border border-zinc-200 rounded-sm p-2">
                                             <div className="flex items-center gap-2 flex-1 min-w-0">
-                                                <Image size={16} className="text-teal-600 flex-shrink-0" />
-                                                <span className="text-sm font-medium text-slate-700 truncate">{file.name}</span>
-                                                <span className="text-xs text-slate-500 flex-shrink-0">({formatFileSize(file.size)})</span>
+                                                <Image size={14} className="text-zinc-500 flex-shrink-0" />
+                                                <span className="text-xs font-mono text-zinc-700 truncate">{file.name}</span>
+                                                <span className="text-[10px] font-mono text-zinc-400 flex-shrink-0">({formatFileSize(file.size)})</span>
                                             </div>
                                             <button
                                                 type="button"
                                                 onClick={() => removeOrthomosaic(index)}
-                                                className="text-rose-500 hover:text-rose-700 transition-colors ml-2"
+                                                className="text-zinc-400 hover:text-rose-600 transition-colors ml-2"
                                             >
-                                                <Trash2 size={16} />
+                                                <Trash2 size={14} />
                                             </button>
                                         </div>
                                     ))}
@@ -307,11 +313,11 @@ const NewSurveyModal = ({ isOpen, onClose, onUploadComplete }) => {
                     {/* Audio Files - Show for acoustic surveys */}
                     {surveyType === 'acoustic' && (
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
-                                <FileAudio size={16} className="text-orange-600" />
-                                Audio Files (.wav, .mp3, .flac)
+                            <label className="block text-xs font-bold text-zinc-600 mb-1.5 uppercase tracking-wide flex items-center gap-2">
+                                <FileAudio size={14} className="text-primary" />
+                                Payload: Audio (.wav)
                             </label>
-                            <div className="border-2 border-dashed border-slate-200 rounded-lg p-4 flex flex-col items-center justify-center text-center hover:bg-slate-50 transition-colors cursor-pointer relative group">
+                            <div className="border border-dashed border-zinc-300 rounded-sm p-6 flex flex-col items-center justify-center text-center hover:bg-zinc-50 transition-colors cursor-pointer relative group bg-zinc-50/30">
                                 <input
                                     type="file"
                                     accept=".wav,.mp3,.flac"
@@ -319,39 +325,39 @@ const NewSurveyModal = ({ isOpen, onClose, onUploadComplete }) => {
                                     onChange={handleAudioChange}
                                     className="absolute inset-0 opacity-0 cursor-pointer"
                                 />
-                                <Upload className="text-slate-400 mb-2 group-hover:text-orange-600 transition-colors" size={24} />
-                                <span className="text-sm text-slate-500">Click to browse or drag audio files here</span>
+                                <Upload className="text-zinc-400 mb-2 group-hover:text-primary transition-colors" size={20} />
+                                <span className="text-xs font-mono text-zinc-500">DRAG_DROP_AUDIO_STREAMS</span>
                             </div>
 
                             {/* Audio File List with ARU Selection */}
                             {audioFiles.length > 0 && (
                                 <div className="mt-3 space-y-2">
                                     {audioFiles.map((file, index) => (
-                                        <div key={index} className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                                        <div key={index} className="bg-zinc-50 border border-zinc-200 rounded-sm p-3">
                                             <div className="flex items-center justify-between mb-2">
                                                 <div className="flex items-center gap-2 flex-1 min-w-0">
-                                                    <FileAudio size={16} className="text-orange-600 flex-shrink-0" />
-                                                    <span className="text-sm font-medium text-slate-700 truncate">{file.name}</span>
-                                                    <span className="text-xs text-slate-500 flex-shrink-0">({formatFileSize(file.size)})</span>
+                                                    <FileAudio size={14} className="text-zinc-600 flex-shrink-0" />
+                                                    <span className="text-xs font-mono text-zinc-900 truncate">{file.name}</span>
+                                                    <span className="text-[10px] font-mono text-zinc-400 flex-shrink-0">({formatFileSize(file.size)})</span>
                                                 </div>
                                                 <button
                                                     type="button"
                                                     onClick={() => removeAudio(index)}
-                                                    className="text-rose-500 hover:text-rose-700 transition-colors ml-2"
+                                                    className="text-zinc-400 hover:text-rose-600 transition-colors ml-2"
                                                 >
-                                                    <Trash2 size={16} />
+                                                    <Trash2 size={14} />
                                                 </button>
                                             </div>
 
                                             {/* ARU Selection */}
                                             <div className="flex items-center gap-2">
-                                                <MapPin size={14} className="text-orange-600 flex-shrink-0" />
+                                                <MapPin size={12} className="text-zinc-400 flex-shrink-0" />
                                                 <select
                                                     value={audioAruMap[index] || ''}
                                                     onChange={(e) => setAruForAudio(index, e.target.value)}
-                                                    className="flex-1 text-sm px-2 py-1 bg-white border border-orange-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+                                                    className="flex-1 text-xs px-2 py-1.5 bg-white border border-zinc-300 rounded-sm focus:outline-none focus:border-primary font-mono"
                                                 >
-                                                    <option value="">Select ARU Location...</option>
+                                                    <option value="">SELECT_SENSOR_NODE...</option>
                                                     {availableArus.map(aru => (
                                                         <option key={aru.id} value={aru.id}>
                                                             {aru.name} ({aru.lat.toFixed(5)}, {aru.lon.toFixed(5)})
@@ -367,57 +373,57 @@ const NewSurveyModal = ({ isOpen, onClose, onUploadComplete }) => {
                                         <button
                                             type="button"
                                             onClick={() => setShowNewAruForm(true)}
-                                            className="w-full flex items-center justify-center gap-2 px-3 py-2 border-2 border-dashed border-orange-300 rounded-lg text-orange-600 hover:bg-orange-50 transition-colors text-sm font-medium"
+                                            className="w-full flex items-center justify-center gap-2 px-3 py-2 border border-dashed border-zinc-300 rounded-sm text-zinc-600 hover:bg-zinc-50 transition-colors text-xs font-medium uppercase tracking-wide"
                                         >
-                                            <Plus size={16} />
-                                            Add New ARU Location
+                                            <Plus size={14} />
+                                            Define New Sensor Node
                                         </button>
                                     )}
 
                                     {/* New ARU Form */}
                                     {showNewAruForm && (
-                                        <div className="bg-white border-2 border-orange-300 rounded-lg p-3 space-y-2">
+                                        <div className="bg-zinc-50 border border-zinc-200 rounded-sm p-3 space-y-2">
                                             <div className="flex items-center justify-between mb-2">
-                                                <span className="text-sm font-semibold text-slate-700">New ARU Location</span>
+                                                <span className="text-xs font-bold text-zinc-700 uppercase">New Node Config</span>
                                                 <button
                                                     type="button"
                                                     onClick={() => setShowNewAruForm(false)}
-                                                    className="text-slate-400 hover:text-slate-600"
+                                                    className="text-zinc-400 hover:text-zinc-600"
                                                 >
-                                                    <X size={16} />
+                                                    <X size={14} />
                                                 </button>
                                             </div>
                                             <input
                                                 type="text"
-                                                placeholder="ARU Name (e.g., ARU 4)"
+                                                placeholder="NODE_ID (e.g. ARU_04)"
                                                 value={newAruName}
                                                 onChange={(e) => setNewAruName(e.target.value)}
-                                                className="w-full text-sm px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+                                                className="w-full text-xs font-mono px-2 py-1 border border-zinc-300 rounded-sm focus:outline-none focus:border-primary bg-white"
                                             />
                                             <div className="grid grid-cols-2 gap-2">
                                                 <input
                                                     type="number"
                                                     step="any"
-                                                    placeholder="Latitude"
+                                                    placeholder="LATITUDE"
                                                     value={newAruLat}
                                                     onChange={(e) => setNewAruLat(e.target.value)}
-                                                    className="text-sm px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+                                                    className="text-xs font-mono px-2 py-1 border border-zinc-300 rounded-sm focus:outline-none focus:border-primary bg-white"
                                                 />
                                                 <input
                                                     type="number"
                                                     step="any"
-                                                    placeholder="Longitude"
+                                                    placeholder="LONGITUDE"
                                                     value={newAruLon}
                                                     onChange={(e) => setNewAruLon(e.target.value)}
-                                                    className="text-sm px-2 py-1 border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+                                                    className="text-xs font-mono px-2 py-1 border border-zinc-300 rounded-sm focus:outline-none focus:border-primary bg-white"
                                                 />
                                             </div>
                                             <button
                                                 type="button"
                                                 onClick={handleCreateAru}
-                                                className="w-full px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-sm font-medium rounded transition-colors"
+                                                className="w-full px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-bold uppercase rounded-sm transition-colors"
                                             >
-                                                Create ARU
+                                                Initialize Node
                                             </button>
                                         </div>
                                     )}
@@ -428,25 +434,25 @@ const NewSurveyModal = ({ isOpen, onClose, onUploadComplete }) => {
 
                     {/* Error Message */}
                     {error && (
-                        <div className="text-sm text-rose-600 bg-rose-50 px-3 py-2 rounded-lg">
-                            {error}
+                        <div className="text-xs text-rose-600 bg-rose-50 border border-rose-200 px-3 py-2 rounded-sm font-mono">
+                            ERROR: {error}
                         </div>
                     )}
 
                     {/* Submit Button */}
-                    <div className="pt-2">
+                    <div className="pt-2 border-t border-zinc-200">
                         <button
                             type="submit"
                             disabled={isUploading}
-                            className="w-full py-2.5 bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white font-semibold rounded-lg shadow-lg shadow-teal-500/20 transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                            className="w-full py-3 bg-primary hover:bg-teal-900 text-white font-bold uppercase tracking-wider text-xs rounded-sm shadow-none transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 border border-transparent"
                         >
                             {isUploading ? (
                                 <>
-                                    <Loader2 className="animate-spin" size={18} />
-                                    Uploading...
+                                    <Loader2 className="animate-spin" size={14} />
+                                    PROCESSING_STREAM...
                                 </>
                             ) : (
-                                `Upload ${orthomosaicFiles.length + audioFiles.length} File(s)`
+                                `INITIATE_UPLOAD (${orthomosaicFiles.length + audioFiles.length})`
                             )}
                         </button>
                     </div>

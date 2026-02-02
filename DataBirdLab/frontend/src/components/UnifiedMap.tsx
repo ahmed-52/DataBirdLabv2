@@ -1,79 +1,96 @@
 import React from 'react';
-import { MapContainer, TileLayer, Marker, Circle, Tooltip, Rectangle, Popup } from 'react-leaflet';
-import MarkerClusterGroup from 'react-leaflet-cluster'; // <--- Import this
+import { MapContainer, TileLayer, Circle, Tooltip, Rectangle, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { VisualDetection, AcousticDetection } from '../mockData';
+import { VisualDetection, AcousticDetection, ARU } from '@/types';
+import { useEffect } from 'react';
+
+// Internal component to handle map interactions/animations
+const MapController = ({ surveys, arus, autoZoom }: { surveys: any[], arus: ARU[], autoZoom: boolean }) => {
+    const map = useMap();
+
+    useEffect(() => {
+        if (autoZoom && surveys.length > 0) {
+            // Collect all bounds
+            const bounds = L.latLngBounds([]);
+            let hasBounds = false;
+
+            surveys.forEach(s => {
+                if (s.bounds && s.bounds.min_lat) {
+                    bounds.extend([s.bounds.min_lat, s.bounds.min_lon]);
+                    bounds.extend([s.bounds.max_lat, s.bounds.max_lon]);
+                    hasBounds = true;
+                }
+            });
+
+            // Also include ARUs in bounds if present
+            if (arus.length > 0) {
+                arus.forEach(aru => {
+                    bounds.extend([aru.lat, aru.lon]);
+                    hasBounds = true;
+                });
+            }
+
+            if (hasBounds) {
+                map.flyToBounds(bounds, {
+                    padding: [50, 50],
+                    duration: 1.5,
+                    maxZoom: 18
+                });
+            }
+        }
+    }, [surveys, arus, map, autoZoom]);
+
+    return null;
+};
 
 interface UnifiedMapProps {
     visualDetections: VisualDetection[];
     acousticDetections: AcousticDetection[];
+    arus?: ARU[];
     onSelectVisual: (d: VisualDetection) => void;
     onSelectAcoustic: (d: AcousticDetection) => void;
     onSelectARU?: (aruData: { id: string, lat: number, lon: number, detectionCount: number, aru_id?: number }) => void;
     onSelectSurvey?: (survey: any) => void;
-    surveys?: any[]; // Using any for now to match backend response structure locally
+    surveys?: any[];
+    autoZoom?: boolean;
 }
 
-const UnifiedMap: React.FC<UnifiedMapProps> = ({ visualDetections, acousticDetections, onSelectVisual, onSelectAcoustic, onSelectARU, onSelectSurvey, surveys = [] }) => {
+const UnifiedMap: React.FC<UnifiedMapProps> = ({
+    visualDetections,
+    acousticDetections,
+    arus = [],
+    onSelectVisual,
+    onSelectAcoustic,
+    onSelectARU,
+    onSelectSurvey,
+    surveys = [],
+    autoZoom = true
+}) => {
 
-    // Optimized Icon: Use a simpler structure if possible, but your divIcon is fine with clustering
-    const visualIcon = L.divIcon({
-        className: 'custom-div-icon',
-        html: `<div class="w-4 h-4 bg-teal-500 border-2 border-white shadow-md rounded-sm transform rotate-45 cursor-pointer hover:bg-teal-400"></div>`,
-        iconSize: [16, 16],
-        iconAnchor: [8, 8],
-    });
+    const centerPos: [number, number] = [11.40547, 105.39735]; // Centered on ARU locations
 
-    // Custom function to style the cluster icons (Optional: matches your teal theme)
-    const createClusterCustomIcon = function (cluster: any) {
-        return L.divIcon({
-            html: `<div class="flex items-center justify-center w-8 h-8 bg-teal-600 text-white rounded-full font-bold border-2 border-white shadow-lg text-xs">${cluster.getChildCount()}</div>`,
-            className: 'custom-cluster-icon',
-            iconSize: L.point(32, 32, true),
-        });
-    }
-
-    const centerPos: [number, number] = [11.408837, 105.394870];
-
-    // Memoize stations to prevent re-calc on every render
-    const aruStations = React.useMemo(() => {
-        const stations: { [key: string]: { lat: number, lon: number, detections: AcousticDetection[], id: string, aru_id?: number } } = {};
-        acousticDetections.forEach(d => {
-            // Prefer grouping by ARU ID if available
-            const key = d.aru_id ? `aru-${d.aru_id}` : `${d.lat.toFixed(4)},${d.lon.toFixed(4)}`;
-
-            if (!stations[key]) {
-                stations[key] = {
-                    lat: d.lat,
-                    lon: d.lon,
-                    detections: [],
-                    id: d.aru_id ? `ARU ${d.aru_id}` : `Station ${Object.keys(stations).length + 1}`,
-                    aru_id: d.aru_id
-                };
-            }
-            stations[key].detections.push(d);
-        });
-        return Object.values(stations);
-    }, [acousticDetections]);
+    // Map bounds to lock the view to the colony area
+    const mapBounds: L.LatLngBoundsExpression = [
+        [11.39, 105.37], // Southwest
+        [11.43, 105.42]  // Northeast
+    ];
 
     return (
         <div className="h-full w-full rounded-2xl overflow-hidden relative z-0">
             <MapContainer
                 center={centerPos}
                 zoom={16}
-                minZoom={15} // Lock user from zooming out too far
-                maxZoom={18} // Moderate zoom in allowed
-                scrollWheelZoom={false} // Disable scroll zoom to prevent accidental movement
-                maxBounds={[
-                    [11.39, 105.37], // Southwest coordinates
-                    [11.43, 105.42]  // Northeast coordinates
-                ]}
-                maxBoundsViscosity={1.0} // Sticky bounds
+                minZoom={15}
+                maxZoom={19}
+                scrollWheelZoom={true}
+                maxBounds={mapBounds}
+                maxBoundsViscosity={1.0}
                 style={{ height: '100%', width: '100%' }}
                 zoomControl={false}
-                preferCanvas={true} // <--- Tries to use Canvas renderer instead of DOM for basic shapes
+                preferCanvas={true}
             >
+                <MapController surveys={surveys} arus={arus} autoZoom={autoZoom} />
                 <TileLayer
                     url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
                     attribution='Tiles &copy; Esri'
@@ -84,7 +101,6 @@ const UnifiedMap: React.FC<UnifiedMapProps> = ({ visualDetections, acousticDetec
                     const b = survey.bounds;
                     if (!b || !b.min_lat || !b.max_lat || !b.min_lon || !b.max_lon) return null;
 
-                    // Leaflet Rectangle bounds: [[lat1, lon1], [lat2, lon2]] (Corners)
                     const bounds: [[number, number], [number, number]] = [
                         [b.min_lat, b.min_lon],
                         [b.max_lat, b.max_lon]
@@ -95,9 +111,9 @@ const UnifiedMap: React.FC<UnifiedMapProps> = ({ visualDetections, acousticDetec
                             key={`survey-${survey.id}`}
                             bounds={bounds}
                             pathOptions={{
-                                color: '#38BDF8',
-                                fillColor: '#38BDF8',
-                                fillOpacity: 0.15,
+                                color: survey.type === 'drone' ? '#14b8a6' : '#f97316',
+                                fillColor: survey.type === 'drone' ? '#14b8a6' : '#f97316',
+                                fillOpacity: 0.1,
                                 weight: 1,
                                 dashArray: '4, 4'
                             }}
@@ -106,95 +122,69 @@ const UnifiedMap: React.FC<UnifiedMapProps> = ({ visualDetections, acousticDetec
                                     if (onSelectSurvey) onSelectSurvey(survey);
                                 },
                                 mouseover: (e) => {
-                                    e.target.setStyle({ weight: 2, fillOpacity: 0.3 });
+                                    e.target.setStyle({ weight: 2, fillOpacity: 0.2 });
                                     e.target.openTooltip();
                                 },
                                 mouseout: (e) => {
-                                    e.target.setStyle({ weight: 1, fillOpacity: 0.15 });
+                                    e.target.setStyle({ weight: 1, fillOpacity: 0.1 });
                                     e.target.closeTooltip();
                                 }
                             }}
                         >
-                            <Tooltip sticky direction="center" className="glass-tooltip">
-                                <div className="text-center">
-                                    <div className="font-bold text-slate-800">{survey.name}</div>
-                                    <div className="text-xs text-slate-500">{new Date(survey.date).toLocaleDateString()}</div>
+                            <Tooltip sticky direction="center" className="bg-white/90 backdrop-blur border border-stone-200 shadow-lg rounded-xl px-3 py-2 text-center" opacity={1}>
+                                <div>
+                                    <div className="font-bold text-stone-800">{survey.name}</div>
+                                    <div className="text-xs text-stone-500">{new Date(survey.date).toLocaleDateString()}</div>
                                 </div>
                             </Tooltip>
                         </Rectangle>
                     )
                 })}
 
-                {/* Layer 1: Acoustic (Keep these separate, they are important landmarks) */}
-                {aruStations.map((station) => (
+                {/* Layer 1: ARU Stations */}
+                {arus.map((aru) => (
                     <Circle
-                        key={station.id}
-                        center={[station.lat, station.lon]}
-                        radius={50}
-                        pathOptions={{ color: '#F97316', fillColor: '#F97316', fillOpacity: 0.2, weight: 2, dashArray: '5, 5' }}
+                        key={`aru-${aru.id}`}
+                        center={[aru.lat, aru.lon]}
+                        radius={40}
+                        pathOptions={{
+                            color: '#F97316',
+                            fillColor: '#F97316',
+                            fillOpacity: 0.3,
+                            weight: 2,
+                            dashArray: '5, 5'
+                        }}
                         eventHandlers={{
                             click: () => {
                                 if (onSelectARU) {
                                     onSelectARU({
-                                        id: station.id,
-                                        lat: station.lat,
-                                        lon: station.lon,
-                                        detectionCount: station.detections.length,
-                                        aru_id: station.aru_id
+                                        id: `ARU-${aru.id}`,
+                                        lat: aru.lat,
+                                        lon: aru.lon,
+                                        detectionCount: 0,
+                                        aru_id: aru.id
                                     });
-                                } else if (station.detections.length > 0) {
-                                    onSelectAcoustic(station.detections[0]);
                                 }
                             },
                         }}
                     >
-                        {/* Only show tooltip on hover to save resources */}
                         <Tooltip sticky direction="top" offset={[0, -10]}>
-                            <span className="font-bold text-xs">{station.id}</span>
+                            <span className="font-bold text-xs">{aru.name}</span>
                         </Tooltip>
                     </Circle>
                 ))}
 
-                {/* Layer 2: Visual Detections (Areas instead of Markers) */}
-                {/* Layer 2: Visual Detections (Removed as per user request) */}
-                {/* {visualDetections.map((d) => (
-                    <Circle
-                        key={d.id}
-                        center={[d.lat, d.lon]}
-                        radius={1.5}
-                        pathOptions={{
-                            color: '#38BDF8',
-                            fillColor: '#38BDF8',
-                            fillOpacity: 0.4,
-                            weight: 1
-                        }}
-                        eventHandlers={{
-                            click: () => onSelectVisual(d),
-                            mouseover: (e) => { e.target.setStyle({ fillOpacity: 0.7, weight: 2 }); },
-                            mouseout: (e) => { e.target.setStyle({ fillOpacity: 0.4, weight: 1 }); }
-                        }}
-                    >
-                        <Tooltip sticky direction="top" offset={[0, -5]}>
-                            <span className="font-semibold text-xs">{d.species}</span>
-                        </Tooltip>
-                    </Circle>
-                ))} */}
-
             </MapContainer>
 
-            {/* Legend (Keep as is) */}
-            <div className="absolute bottom-6 left-6 z-[400] bg-white/90 backdrop-blur p-3 rounded-lg shadow-sm border border-slate-200 text-xs text-slate-700 space-y-2">
+            {/* Legend */}
+            <div className="absolute bottom-4 left-4 z-[400] bg-white/95 backdrop-blur-sm p-3 rounded-sm border border-zinc-200 shadow-sm text-[10px] font-mono text-zinc-600 space-y-1.5 uppercase tracking-wide">
                 <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 bg-teal-500 rounded-sm transform rotate-45"></div>
-                    <span>Visual Detection</span>
+                    <div className="w-2.5 h-2.5 bg-teal-500/20 border border-teal-600 rounded-sm"></div>
+                    <span>Aerial Coverage</span>
                 </div>
                 <div className="flex items-center gap-2">
-                    <div className="flex items-center justify-center w-4 h-4 bg-teal-600 text-white rounded-full text-[8px] font-bold">10</div>
-                    <span>Cluster (Zoom to see)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 bg-orange-500 rounded-full opacity-50"></div>
-                    <span>Acoustic Range (50m)</span>
+                    <div className="w-2.5 h-2.5 bg-orange-500/20 border border-orange-500 border-dashed rounded-full"></div>
+                    <span>Acoustic Range</span>
                 </div>
             </div>
         </div>
