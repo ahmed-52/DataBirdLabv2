@@ -1,7 +1,0 @@
-path: ./
-train: images/train
-names:
-  0: asian_openbill
-  1: black_headed_ibis
-  2: white_birds
-  3: black_birds
