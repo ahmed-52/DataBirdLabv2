@@ -13,6 +13,10 @@ interface DensityControlProps {
     acousticRangeVisible: boolean;
     onCoverageToggle: () => void;
     onAcousticRangeToggle: () => void;
+    droneOpacity: number;
+    acousticOpacity: number;
+    onDroneOpacityChange: (v: number) => void;
+    onAcousticOpacityChange: (v: number) => void;
 }
 
 const DensityControl: React.FC<DensityControlProps> = ({
@@ -26,6 +30,10 @@ const DensityControl: React.FC<DensityControlProps> = ({
     acousticRangeVisible,
     onCoverageToggle,
     onAcousticRangeToggle,
+    droneOpacity,
+    acousticOpacity,
+    onDroneOpacityChange,
+    onAcousticOpacityChange,
 }) => {
     const [expanded, setExpanded] = useState(true);
 
@@ -98,32 +106,34 @@ const DensityControl: React.FC<DensityControlProps> = ({
                                         className={`flex items-center gap-1.5 transition-colors ${droneVisible ? 'text-teal-600' : 'text-zinc-300'}`}
                                         title={droneVisible ? 'Hide drone density' : 'Show drone density'}
                                     >
-                                        {droneVisible
-                                            ? <Eye size={11} />
-                                            : <EyeOff size={11} />
-                                        }
-                                        <span className={droneVisible ? 'text-zinc-700' : 'text-zinc-300'}>
-                                            Drone
-                                        </span>
+                                        {droneVisible ? <Eye size={11} /> : <EyeOff size={11} />}
+                                        <span className={droneVisible ? 'text-zinc-700' : 'text-zinc-300'}>Drone</span>
                                     </button>
                                     <span className={`tabular-nums transition-colors ${droneVisible ? 'text-zinc-500' : 'text-zinc-300'}`}>
                                         {droneCount.toLocaleString()} pts
                                     </span>
                                 </div>
-                                {/* Gradient swatch */}
                                 <motion.div
                                     animate={{ opacity: droneVisible ? 1 : 0.25 }}
                                     transition={{ duration: 0.2 }}
-                                    className="flex items-center gap-1.5"
+                                    className="space-y-1"
                                 >
-                                    <span className="text-zinc-400 shrink-0">lo</span>
-                                    <div
-                                        className="flex-1 h-2 rounded-sm"
-                                        style={{
-                                            background: 'linear-gradient(to right, transparent, #0d9488 35%, #22d3ee 60%, #a5f3fc 80%, #ecfeff)',
-                                        }}
-                                    />
-                                    <span className="text-zinc-400 shrink-0">hi</span>
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="text-zinc-400 shrink-0">lo</span>
+                                        <div className="flex-1 h-2 rounded-sm" style={{ background: 'linear-gradient(to right, transparent, #0d9488 35%, #22d3ee 60%, #a5f3fc 80%, #ecfeff)' }} />
+                                        <span className="text-zinc-400 shrink-0">hi</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="text-zinc-400 shrink-0 w-3 text-center">0</span>
+                                        <input
+                                            type="range" min={0} max={100}
+                                            value={Math.round(droneOpacity * 100)}
+                                            onChange={e => onDroneOpacityChange(Number(e.target.value) / 100)}
+                                            disabled={!droneVisible}
+                                            className="flex-1 h-1 accent-teal-600 cursor-pointer disabled:cursor-default disabled:opacity-40"
+                                        />
+                                        <span className="text-zinc-400 shrink-0 w-3 text-center">1</span>
+                                    </div>
                                 </motion.div>
                             </div>
 
@@ -135,32 +145,34 @@ const DensityControl: React.FC<DensityControlProps> = ({
                                         className={`flex items-center gap-1.5 transition-colors ${acousticVisible ? 'text-orange-500' : 'text-zinc-300'}`}
                                         title={acousticVisible ? 'Hide acoustic density' : 'Show acoustic density'}
                                     >
-                                        {acousticVisible
-                                            ? <Eye size={11} />
-                                            : <EyeOff size={11} />
-                                        }
-                                        <span className={acousticVisible ? 'text-zinc-700' : 'text-zinc-300'}>
-                                            Acoustic
-                                        </span>
+                                        {acousticVisible ? <Eye size={11} /> : <EyeOff size={11} />}
+                                        <span className={acousticVisible ? 'text-zinc-700' : 'text-zinc-300'}>Acoustic</span>
                                     </button>
                                     <span className={`tabular-nums transition-colors ${acousticVisible ? 'text-zinc-500' : 'text-zinc-300'}`}>
                                         {acousticCount.toLocaleString()} pts
                                     </span>
                                 </div>
-                                {/* Gradient swatch */}
                                 <motion.div
                                     animate={{ opacity: acousticVisible ? 1 : 0.25 }}
                                     transition={{ duration: 0.2 }}
-                                    className="flex items-center gap-1.5"
+                                    className="space-y-1"
                                 >
-                                    <span className="text-zinc-400 shrink-0">lo</span>
-                                    <div
-                                        className="flex-1 h-2 rounded-sm"
-                                        style={{
-                                            background: 'linear-gradient(to right, transparent, #ea580c 35%, #fbbf24 60%, #fde68a 80%, #fffbeb)',
-                                        }}
-                                    />
-                                    <span className="text-zinc-400 shrink-0">hi</span>
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="text-zinc-400 shrink-0">lo</span>
+                                        <div className="flex-1 h-2 rounded-sm" style={{ background: 'linear-gradient(to right, transparent, #ea580c 35%, #fbbf24 60%, #fde68a 80%, #fffbeb)' }} />
+                                        <span className="text-zinc-400 shrink-0">hi</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="text-zinc-400 shrink-0 w-3 text-center">0</span>
+                                        <input
+                                            type="range" min={0} max={100}
+                                            value={Math.round(acousticOpacity * 100)}
+                                            onChange={e => onAcousticOpacityChange(Number(e.target.value) / 100)}
+                                            disabled={!acousticVisible}
+                                            className="flex-1 h-1 accent-orange-500 cursor-pointer disabled:cursor-default disabled:opacity-40"
+                                        />
+                                        <span className="text-zinc-400 shrink-0 w-3 text-center">1</span>
+                                    </div>
                                 </motion.div>
                             </div>
                         </div>

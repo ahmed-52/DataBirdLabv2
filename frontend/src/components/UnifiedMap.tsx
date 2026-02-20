@@ -6,16 +6,7 @@ import { VisualDetection, AcousticDetection, ARU } from '@/types';
 import { useEffect } from 'react';
 import HeatmapLayer from './HeatmapLayer';
 import DensityControl from './DensityControl';
-
-// Stable gradient constants — defined outside the component so they are never recreated
-const DRONE_GRADIENT: Record<number, string> = {
-    0.0: 'transparent',
-    0.25: 'rgba(13, 148, 136, 0.5)',  // teal-600
-    0.5: '#0d9488',
-    0.7: '#22d3ee',                   // cyan-400
-    0.88: '#a5f3fc',                  // cyan-200
-    1.0: '#ecfeff',                   // cyan-50
-};
+import SpeciesDensityLayer, { getDroneSpeciesLegend } from './SpeciesDensityLayer';
 
 const ACOUSTIC_GRADIENT: Record<number, string> = {
     0.0: 'transparent',
@@ -94,17 +85,23 @@ const UnifiedMap: React.FC<UnifiedMapProps> = ({
         [11.43, 105.42]
     ];
 
-    // ── Density layer visibility state ──────────────────────────────────────
+    // ── Density layer visibility + opacity state ─────────────────────────────
     const [droneHeatVisible, setDroneHeatVisible] = useState(true);
     const [acousticHeatVisible, setAcousticHeatVisible] = useState(true);
-    const [coverageVisible, setCoverageVisible] = useState(true);
-    const [acousticRangeVisible, setAcousticRangeVisible] = useState(true);
+    const [coverageVisible, setCoverageVisible] = useState(false);
+    const [acousticRangeVisible, setAcousticRangeVisible] = useState(false);
+    const [droneOpacity, setDroneOpacity] = useState(0.75);
+    const [acousticOpacity, setAcousticOpacity] = useState(0.6);
 
-    // ── Drone heatmap: each detection = one point, intensity = confidence ───
-    const droneHeatPoints = useMemo<Array<[number, number, number]>>(() =>
-        visualDetections
-            .filter(d => d.lat != null && d.lon != null)
-            .map(d => [d.lat, d.lon, d.confidence]),
+    // ── Drone density: point count for the DensityControl badge ────────────
+    const droneHeatPoints = useMemo(() =>
+        visualDetections.filter(d => d.lat != null && d.lon != null),
+        [visualDetections]
+    );
+
+    // ── Species legend entries (derived from current detections) ─────────
+    const speciesLegend = useMemo(
+        () => getDroneSpeciesLegend(visualDetections),
         [visualDetections]
     );
 
@@ -154,25 +151,21 @@ const UnifiedMap: React.FC<UnifiedMapProps> = ({
                     maxZoom={19}
                 />
 
-                {/* ── Density heatmap layers (rendered below all markers) ── */}
-                <HeatmapLayer
-                    points={droneHeatPoints}
+                {/* ── Drone species density (canvas, colored per species) ── */}
+                <SpeciesDensityLayer
+                    detections={visualDetections}
                     visible={droneHeatVisible}
-                    gradient={DRONE_GRADIENT}
-                    radius={38}
-                    blur={28}
-                    max={1.0}
-                    minOpacity={0.25}
+                    radiusMeters={18}
+                    opacity={droneOpacity}
                 />
                 <HeatmapLayer
                     points={acousticHeatPoints}
                     visible={acousticHeatVisible}
                     gradient={ACOUSTIC_GRADIENT}
-                    radius={50}
-                    blur={35}
+                    radiusMeters={30}
                     max={1.0}
-                    minOpacity={0.4}
-                    maxZoom={17}
+                    minOpacity={0.35}
+                    opacity={acousticOpacity}
                 />
 
                 {/* ── Survey Bounds ─────────────────────────────────────── */}
@@ -257,6 +250,22 @@ const UnifiedMap: React.FC<UnifiedMapProps> = ({
                     <div className="w-2.5 h-2.5 bg-orange-500/20 border border-orange-500 border-dashed rounded-full"></div>
                     <span>Acoustic Range</span>
                 </div>
+                {droneHeatVisible && speciesLegend.length > 0 && (
+                    <>
+                        <div className="border-t border-zinc-100 pt-1.5 text-zinc-400">Drone Species</div>
+                        {speciesLegend.map(({ species, color }) => (
+                            <div key={species} className="flex items-center gap-2">
+                                <div
+                                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                                    style={{ background: color, opacity: 0.85 }}
+                                />
+                                <span className="truncate max-w-[100px]">
+                                    {species.replace(/_/g, ' ')}
+                                </span>
+                            </div>
+                        ))}
+                    </>
+                )}
             </div>
 
             {/* ── Bottom-right density control ────────────────────────── */}
@@ -267,6 +276,10 @@ const UnifiedMap: React.FC<UnifiedMapProps> = ({
                     onDroneToggle={() => setDroneHeatVisible(v => !v)}
                     onAcousticToggle={() => setAcousticHeatVisible(v => !v)}
                     droneCount={droneHeatPoints.length}
+                    droneOpacity={droneOpacity}
+                    acousticOpacity={acousticOpacity}
+                    onDroneOpacityChange={setDroneOpacity}
+                    onAcousticOpacityChange={setAcousticOpacity}
                     acousticCount={acousticDetections.length}
                     coverageVisible={coverageVisible}
                     acousticRangeVisible={acousticRangeVisible}
