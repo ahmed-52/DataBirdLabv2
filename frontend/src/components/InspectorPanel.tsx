@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, Mic, Image as ImageIcon, MapPin, ExternalLink, Activity, PlayCircle, BarChart3, List, PieChart } from 'lucide-react';
 import { PieChart as RePieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, Legend } from 'recharts';
 import { VisualDetection, AcousticDetection, visualDetections, acousticDetections } from '../mockData';
+import { apiClient } from '@/lib/apiClient';
 
 interface InspectorPanelProps {
     isOpen: boolean;
@@ -81,12 +82,14 @@ const InspectorPanel: React.FC<InspectorPanelProps> = ({
             cutoffDate.setDate(cutoffDate.getDate() - filterDays);
 
             Promise.all([
-                fetch(`/api/detections/visual?survey_ids=${selectedSurvey.id}&days=3650`).then(res => res.json()),
-                fetch(`/api/detections/acoustic?survey_ids=${selectedSurvey.id}&days=3650`).then(res => res.json())
+                apiClient.get(`/api/detections/visual?survey_ids=${selectedSurvey.id}&days=3650`),
+                apiClient.get(`/api/detections/acoustic?survey_ids=${selectedSurvey.id}&days=3650`)
             ]).then(([visual, acoustic]) => {
+                const visualArr = Array.isArray(visual) ? visual : [];
+                const acousticArr = Array.isArray(acoustic) ? acoustic : [];
                 const combined = [
-                    ...visual.map((d: any) => ({ ...d, type: 'visual', timestamp: d.timestamp || new Date().toISOString() })),
-                    ...acoustic.map((d: any) => ({ ...d, type: 'acoustic', timestamp: d.timestamp || new Date().toISOString() }))
+                    ...visualArr.map((d: any) => ({ ...d, type: 'visual', timestamp: d.timestamp || new Date().toISOString() })),
+                    ...acousticArr.map((d: any) => ({ ...d, type: 'acoustic', timestamp: d.timestamp || new Date().toISOString() }))
                 ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
                 setAllDetections(combined);
             }).catch(err => {
@@ -108,8 +111,7 @@ const InspectorPanel: React.FC<InspectorPanelProps> = ({
                 return;
             }
 
-            fetch(`/api/arus/${targetId}/detections?days=${filterDays}&survey_ids=${selectedSurveyIds.join(',')}`)
-                .then(res => res.json())
+            apiClient.get(`/api/arus/${targetId}/detections?days=${filterDays}&survey_ids=${selectedSurveyIds.join(',')}`)
                 .then(data => {
                     if (!Array.isArray(data)) {
                         setFilteredDetections([]);
@@ -326,7 +328,7 @@ const InspectorPanel: React.FC<InspectorPanelProps> = ({
                                                     width: `${w_pct}%`,
                                                     height: `${h_pct}%`,
                                                     borderColor: color.border,
-                                                    borderWidth: '1px'
+                                                    borderWidth: '2.5px'
                                                 }}
                                             >
                                                 <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ backgroundColor: color.bg }} />

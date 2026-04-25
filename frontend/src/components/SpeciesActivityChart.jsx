@@ -3,24 +3,25 @@ import {
     AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer
 } from 'recharts';
 import { Activity, ChevronDown, Filter } from 'lucide-react';
+import { apiClient } from '@/lib/apiClient';
 
 const SpeciesActivityChart = ({ type = 'visual', title }) => {
     // State
     const [speciesList, setSpeciesList] = useState([]);
     const [selectedSpecies, setSelectedSpecies] = useState('Asian Openbill');
-    const [days, setDays] = useState(30);
+    const [days, setDays] = useState(90);
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(false);
 
     // Fetch Species List on Mount
     useEffect(() => {
-        fetch(`http://localhost:8000/api/species_list?type=${type}`)
-            .then(res => res.json())
+        apiClient.get(`/api/species_list?type=${type}`)
             .then(list => {
-                setSpeciesList(list);
+                const arr = Array.isArray(list) ? list : [];
+                setSpeciesList(arr);
                 // If default not found, pick first
-                if (list.length > 0 && !list.includes('Asian Openbill')) {
-                    setSelectedSpecies(list[0]);
+                if (arr.length > 0 && !arr.includes('Asian Openbill')) {
+                    setSelectedSpecies(arr[0]);
                 }
             })
             .catch(err => console.error("Failed to fetch species list:", err));
@@ -31,9 +32,8 @@ const SpeciesActivityChart = ({ type = 'visual', title }) => {
         if (!selectedSpecies) return;
 
         setLoading(true);
-        fetch(`http://localhost:8000/api/stats/species_history?species_name=${encodeURIComponent(selectedSpecies)}&days=${days}&type=${type}`)
-            .then(res => res.json())
-            .then(setData)
+        apiClient.get(`/api/stats/species_history?species_name=${encodeURIComponent(selectedSpecies)}&days=${days}&type=${type}`)
+            .then(result => setData(Array.isArray(result) ? result : []))
             .catch(err => console.error("Failed to fetch species history:", err))
             .finally(() => setLoading(false));
     }, [selectedSpecies, days, type]);

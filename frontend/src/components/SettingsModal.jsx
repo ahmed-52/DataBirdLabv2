@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, X, Loader2, Settings, Save, AlertTriangle, FileCode } from 'lucide-react';
+import { apiClient } from '@/lib/apiClient';
+import { useCurrentColony } from '@/contexts/CurrentColonyContext';
 
 const SettingsModal = ({ isOpen, onClose }) => {
+    const { currentColony } = useCurrentColony();
     const [minConfidence, setMinConfidence] = useState(0.25);
-    const [defaultLat, setDefaultLat] = useState(11.406949);
-    const [defaultLon, setDefaultLon] = useState(105.394883);
+    const [defaultLat, setDefaultLat] = useState(currentColony?.lat ?? 11.406949);
+    const [defaultLon, setDefaultLon] = useState(currentColony?.lon ?? 105.394883);
 
     // File states
     const [acousticModel, setAcousticModel] = useState(null);
@@ -24,9 +27,8 @@ const SettingsModal = ({ isOpen, onClose }) => {
     const fetchSettings = async () => {
         setLoading(true);
         try {
-            const res = await fetch('/api/settings');
-            if (res.ok) {
-                const data = await res.json();
+            const data = await apiClient.get('/api/settings');
+            if (data) {
                 setMinConfidence(data.min_confidence);
                 setDefaultLat(data.default_lat);
                 setDefaultLon(data.default_lon);
@@ -46,30 +48,20 @@ const SettingsModal = ({ isOpen, onClose }) => {
 
         try {
             // 1. Save Basic Settings
-            const res = await fetch('/api/settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    min_confidence: parseFloat(minConfidence),
-                    default_lat: parseFloat(defaultLat),
-                    default_lon: parseFloat(defaultLon),
-                    // ID is fixed to 1 in backend usually
-                    id: 1
-                })
+            await apiClient.post('/api/settings', {
+                min_confidence: parseFloat(minConfidence),
+                default_lat: parseFloat(defaultLat),
+                default_lon: parseFloat(defaultLon),
+                // ID is fixed to 1 in backend usually
+                id: 1
             });
-
-            if (!res.ok) throw new Error("Failed to save configuration");
 
             // 2. Upload Acoustic Model if selected
             if (acousticModel) {
                 const formData = new FormData();
                 formData.append('file', acousticModel);
                 formData.append('type', 'acoustic');
-                const upRes = await fetch('/api/settings/upload-model', {
-                    method: 'POST',
-                    body: formData
-                });
-                if (!upRes.ok) throw new Error("Failed to upload acoustic model");
+                await apiClient.post('/api/settings/upload-model', formData);
             }
 
             // 3. Upload Visual Model if selected
@@ -77,11 +69,7 @@ const SettingsModal = ({ isOpen, onClose }) => {
                 const formData = new FormData();
                 formData.append('file', visualModel);
                 formData.append('type', 'visual');
-                const upRes = await fetch('/api/settings/upload-model', {
-                    method: 'POST',
-                    body: formData
-                });
-                if (!upRes.ok) throw new Error("Failed to upload visual model");
+                await apiClient.post('/api/settings/upload-model', formData);
             }
 
             setMessage({ type: 'success', text: 'Settings saved successfully!' });
@@ -283,10 +271,9 @@ const SpeciesColorMapping = () => {
 
     useEffect(() => {
         // Fetch existing mapping
-        fetch('/api/settings/species_colors')
-            .then(res => res.json())
+        apiClient.get('/api/settings/species_colors')
             .then(data => {
-                if (data.mapping) {
+                if (data && data.mapping) {
                     setMapping({
                         white: data.mapping.white || [],
                         black: data.mapping.black || [],
@@ -321,11 +308,7 @@ const SpeciesColorMapping = () => {
     const handleSave = async () => {
         setSaving(true);
         try {
-            await fetch('/api/settings/species_colors', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(mapping)
-            });
+            await apiClient.post('/api/settings/species_colors', mapping);
         } catch (err) {
             console.error('Failed to save species colors:', err);
         } finally {

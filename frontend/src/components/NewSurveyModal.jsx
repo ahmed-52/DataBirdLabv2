@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, X, Loader2, FileAudio, Image, Trash2, MapPin, Plus } from 'lucide-react';
+import { apiClient } from '@/lib/apiClient';
+import { useCurrentColony } from '@/contexts/CurrentColonyContext';
 
 const NewSurveyModal = ({ isOpen, onClose, onUploadComplete }) => {
+    const { currentColony } = useCurrentColony();
     const [orthomosaicFiles, setOrthomosaicFiles] = useState([]);
     const [audioFiles, setAudioFiles] = useState([]);
     const [audioAruMap, setAudioAruMap] = useState({}); // Maps audio file index to ARU ID
@@ -10,6 +13,7 @@ const NewSurveyModal = ({ isOpen, onClose, onUploadComplete }) => {
     const [surveyType, setSurveyType] = useState('drone'); // 'drone' or 'acoustic'
     const [surveyDate, setSurveyDate] = useState(''); // YYYY-MM-DD format
     const [isUploading, setIsUploading] = useState(false);
+    const [isProcessing, setIsProcessing] = useState(false);
     const [error, setError] = useState('');
 
     // New ARU form
@@ -25,13 +29,26 @@ const NewSurveyModal = ({ isOpen, onClose, onUploadComplete }) => {
         }
     }, [isOpen]);
 
+    // Poll Cloud Run Job status after upload until completed/failed.
+    // Caps at 200 attempts * 3s ≈ 10 min.
+    const pollStatus = async (surveyId) => {
+        for (let i = 0; i < 200; i++) {
+            try {
+                const res = await apiClient.get(`/api/surveys/${surveyId}/status`);
+                if (res?.status === "completed") return { ok: true };
+                if (res?.status === "failed") return { ok: false, error: res?.error_message };
+            } catch (e) {
+                // transient error, keep polling
+            }
+            await new Promise(r => setTimeout(r, 3000));
+        }
+        return { ok: false, error: "Timed out waiting for processing" };
+    };
+
     const fetchArus = async () => {
         try {
-            const res = await fetch('/api/arus');
-            if (res.ok) {
-                const arus = await res.json();
-                setAvailableArus(arus);
-            }
+            const arus = await apiClient.get('/api/arus');
+            setAvailableArus(Array.isArray(arus) ? arus : []);
         } catch (err) {
             console.error('Failed to fetch ARUs:', err);
         }
@@ -49,20 +66,13 @@ const NewSurveyModal = ({ isOpen, onClose, onUploadComplete }) => {
         formData.append('lon', parseFloat(newAruLon));
 
         try {
-            const res = await fetch('/api/arus', {
-                method: 'POST',
-                body: formData
-            });
-
-            if (res.ok) {
-                const newAru = await res.json();
-                setAvailableArus([...availableArus, newAru]);
-                setShowNewAruForm(false);
-                setNewAruName('');
-                setNewAruLat('');
-                setNewAruLon('');
-                setError('');
-            }
+            const newAru = await apiClient.post('/api/arus', formData);
+            setAvailableArus([...availableArus, newAru]);
+            setShowNewAruForm(false);
+            setNewAruName('');
+            setNewAruLat('');
+            setNewAruLon('');
+            setError('');
         } catch (err) {
             setError('Failed to create ARU');
         }
@@ -164,29 +174,38 @@ const NewSurveyModal = ({ isOpen, onClose, onUploadComplete }) => {
         formData.append('audio_aru_mapping', JSON.stringify(audioAruMap));
 
         try {
-            const res = await fetch('/api/surveys/import', {
-                method: 'POST',
-                body: formData,
-            });
-
-            if (!res.ok) {
-                const errorData = await res.json();
-                throw new Error(errorData.detail || "Upload failed");
-            }
-
-            const data = await res.json();
+            const data = await apiClient.post('/api/surveys/import', formData);
             onUploadComplete(data);
 
-            // Reset form
+            // Reset form before kicking off polling so the user can close the modal
             setName('');
             setOrthomosaicFiles([]);
             setAudioFiles([]);
             setAudioAruMap({});
+            setIsUploading(false);
+
+            // Begin async status polling — runs to completion in the background
+            // so the modal can close and the user can keep working. Errors are
+            // logged but don't block the UX.
+            const surveyId = data?.survey_id ?? data?.id;
+            if (surveyId) {
+                setIsProcessing(true);
+                console.log(`polling started for survey ${surveyId}`);
+                pollStatus(surveyId)
+                    .then((result) => {
+                        if (!result.ok) {
+                            console.warn(`Survey ${surveyId} processing failed:`, result.error);
+                        } else {
+                            console.log(`Survey ${surveyId} processing completed`);
+                        }
+                    })
+                    .finally(() => setIsProcessing(false));
+            }
+
             onClose();
         } catch (err) {
             console.error(err);
             setError(err.message || "Failed to upload survey. Please try again.");
-        } finally {
             setIsUploading(false);
         }
     };
@@ -215,7 +234,7 @@ const NewSurveyModal = ({ isOpen, onClose, onUploadComplete }) => {
                             type="text"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
-                            placeholder="e.g. SNE_ZONE2_2026_Q1"
+                            placeholder={`e.g. ${currentColony?.slug?.toUpperCase() ?? "SITE"}_ZONE1_${new Date().getFullYear()}_Q1`}
                             className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 rounded-sm focus:outline-none focus:border-primary text-zinc-900 text-sm font-mono placeholder:text-zinc-400 focus:ring-1 focus:ring-primary"
                         />
                     </div>

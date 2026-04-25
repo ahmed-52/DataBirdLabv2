@@ -1,0 +1,36 @@
+# gcloud uploads to Cloud Build using this file. If missing, gcloud
+# falls back to .gitignore — but .gitignore excludes dist/, which kills
+# the frontend/dist/ bundle we need inside the image. This file mirrors
+# .dockerignore so the upload and the Docker build context match.
+.git/
+.gitignore
+.claude/
+.worktrees/
+.gcloudignore
+
+# Python cruft
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.pytest_cache/
+*.pyc
+.DS_Store
+
+# Local SQLite + uploads/tiles (Cloud Run reads from GCS in prod)
+backend/data/
+backend/static/uploads/
+backend/static/tiles/
+backend/scripts/data/
+
+# Frontend deps (node_modules is enormous; dist is what we want)
+frontend/node_modules/
+frontend/.env*
+!frontend/.env.example
+
+# Docs + scratch
+docs/
+tmp/
+reserach/
+labeling/
+test/
+.context/

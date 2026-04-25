@@ -47,11 +47,13 @@ import {
   AcousticDetection,
   ARU
 } from '@/types';
+import { useCurrentColony } from '@/contexts/CurrentColonyContext';
 
 type FilterMode = '7d' | '30d' | '90d' | 'ytd';
 
 export default function DashboardPage() {
   // --- State ---
+  const { currentColony } = useCurrentColony();
 
   // Data
   const [surveys, setSurveys] = useState<Survey[]>([]);
@@ -61,7 +63,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   // Filters
-  const [filterMode, setFilterMode] = useState<FilterMode>('30d');
+  const [filterMode, setFilterMode] = useState<FilterMode>('ytd');
   const [selectedSurveyIds, setSelectedSurveyIds] = useState<number[]>([]);
 
   // Selection / Inspector
@@ -94,24 +96,24 @@ export default function DashboardPage() {
     initLoad();
   }, []);
 
+  const filterDays = useMemo(() => {
+    if (filterMode === '7d') return 7;
+    if (filterMode === '90d') return 90;
+    if (filterMode === 'ytd') {
+      const now = new Date();
+      const startOfYear = new Date(now.getFullYear(), 0, 1);
+      return Math.ceil((now.getTime() - startOfYear.getTime()) / (1000 * 3600 * 24));
+    }
+    return 30;
+  }, [filterMode]);
+
   // Data Fetch on Filter Change
   useEffect(() => {
     const loadEcologicalData = async () => {
       setLoading(true);
       try {
-        // Calculate days for API
-        let days = 30;
-        if (filterMode === '7d') days = 7;
-        if (filterMode === '90d') days = 90;
-        if (filterMode === 'ytd') {
-          const now = new Date();
-          const startOfYear = new Date(now.getFullYear(), 0, 1);
-          const diff = now.getTime() - startOfYear.getTime();
-          days = Math.ceil(diff / (1000 * 3600 * 24));
-        }
-
         const { visualDetections, acousticDetections } = await fetchEcologicalData(
-          days,
+          filterDays,
           selectedSurveyIds
         );
 
@@ -124,7 +126,7 @@ export default function DashboardPage() {
       }
     };
     loadEcologicalData();
-  }, [filterMode, selectedSurveyIds]);
+  }, [filterDays, selectedSurveyIds]);
 
   // --- Handlers ---
 
@@ -172,7 +174,7 @@ export default function DashboardPage() {
     const s = await fetchSurveys();
     setSurveys(s);
     const { visualDetections, acousticDetections } = await fetchEcologicalData(
-      filterMode === '7d' ? 7 : 30, // Simplification
+      filterDays,
       selectedSurveyIds
     );
     setVisualData(visualDetections);
@@ -230,7 +232,7 @@ export default function DashboardPage() {
         selectedAcoustic={selectedAcoustic}
         selectedARU={selectedARU}
         selectedSurvey={selectedSurvey}
-        filterDays={filterMode === '7d' ? 7 : (filterMode === '90d' ? 90 : 30)}
+        filterDays={filterDays}
         selectedSurveyIds={selectedSurveyIds}
       />
 
@@ -243,7 +245,7 @@ export default function DashboardPage() {
           {/* Logo */}
 
           <h1 className="text-sm font-bold tracking-tight font-display uppercase">
-            DataBird<span className="font-light text-muted-foreground">Lab</span>
+            DataBird
             <span className="ml-2 px-1.5 py-0.5 bg-zinc-100 text-zinc-500 text-[10px] rounded border border-zinc-200 font-mono">Beta</span>
           </h1>
 
@@ -322,10 +324,12 @@ export default function DashboardPage() {
               <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
               <span className="text-[10px] font-mono text-emerald-700 font-medium uppercase tracking-wider">System: Active</span>
               <span className="text-zinc-300">|</span>
-              <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">LOC: 11.55N, 104.91E</span>
+              <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">
+                LOC: {currentColony ? `${currentColony.lat.toFixed(2)}N, ${currentColony.lon.toFixed(2)}E` : "—"}
+              </span>
             </div>
             <h1 className="text-3xl font-display font-bold text-zinc-900 tracking-tight leading-none">
-              Boeung Sne Colony
+              {currentColony?.name ?? "—"}
             </h1>
           </div>
           <div className="text-right">
@@ -450,7 +454,7 @@ export default function DashboardPage() {
                 </div>
                 <CardContent className="h-[220px] p-0">
                   {/* Assuming Chart handles padding internally */}
-                  <WeeklyActivityChart days={filterMode === '7d' ? 7 : 30} visualDetections={chartData} />
+                  <WeeklyActivityChart days={filterDays} visualDetections={chartData} />
                 </CardContent>
               </Card>
 
@@ -462,7 +466,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <CardContent className="h-[240px] p-0">
-                  <SpeciesDistributionChart days={filterMode === '7d' ? 7 : 30} visualDetections={chartData} />
+                  <SpeciesDistributionChart days={filterDays} visualDetections={chartData} />
                 </CardContent>
               </Card>
 

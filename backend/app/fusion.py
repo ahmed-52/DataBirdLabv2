@@ -8,7 +8,7 @@ to generate richer ecological insights.
 import json
 from typing import Optional, Dict, List, Any
 from sqlmodel import Session, select
-from .models import Survey, MediaAsset, ARU, VisualDetection, AcousticDetection, SystemSettings
+from .models import Survey, MediaAsset, ARU, VisualDetection, AcousticDetection, Colony, SystemSettings
 
 # Default species-color mapping (used if no custom mapping is set)
 DEFAULT_SPECIES_COLOR_MAPPING = {
@@ -38,19 +38,19 @@ DEFAULT_SPECIES_COLOR_MAPPING = {
 DRONE_SPECIFIC_SPECIES = ["Asian Openbill", "Black-headed Ibis"]
 
 
-def get_species_color_mapping(session: Session) -> Dict[str, List[str]]:
+def get_species_color_mapping(colony_id: int, session: Session) -> Dict[str, List[str]]:
     """
-    Get the species-color mapping from database settings.
-    Falls back to default if not configured.
+    Get the species-color mapping for a specific colony.
+    Falls back to default if not configured on the Colony row.
     """
-    settings = session.exec(select(SystemSettings).where(SystemSettings.id == 1)).first()
-    
-    if settings and settings.species_color_mapping:
+    colony = session.exec(select(Colony).where(Colony.id == colony_id)).one_or_none()
+
+    if colony and colony.species_color_mapping:
         try:
-            return json.loads(settings.species_color_mapping)
+            return json.loads(colony.species_color_mapping)
         except json.JSONDecodeError:
             pass
-    
+
     return DEFAULT_SPECIES_COLOR_MAPPING
 
 
@@ -65,44 +65,52 @@ def get_color_for_species(species_name: str, mapping: Dict[str, List[str]]) -> O
     return None
 
 
-def find_overlapping_arus(session: Session, survey_id: int) -> List[ARU]:
+def find_overlapping_arus(colony_id: int, session: Session, survey_id: int) -> List[ARU]:
     """
-    Find ARUs that fall within or near a survey's bounding box.
+    Find ARUs (within this colony) that fall within or near a survey's bounding box.
     """
-    # Get survey bounds from its media assets
+    # Verify the survey belongs to this colony, and get bounds from its assets.
+    survey = session.exec(
+        select(Survey).where(Survey.id == survey_id, Survey.colony_id == colony_id)
+    ).one_or_none()
+    if not survey:
+        return []
+
     assets = session.exec(
         select(MediaAsset).where(MediaAsset.survey_id == survey_id)
     ).all()
-    
+
     if not assets:
         return []
-    
+
     # Calculate survey bounding box from all assets
     min_lat = min(a.lat_tl for a in assets if a.lat_tl is not None)
     max_lat = max(a.lat_br for a in assets if a.lat_br is not None)
     min_lon = min(a.lon_tl for a in assets if a.lon_tl is not None)
     max_lon = max(a.lon_br for a in assets if a.lon_br is not None)
-    
+
     if None in (min_lat, max_lat, min_lon, max_lon):
         return []
-    
+
     # Add buffer (approx 100m = 0.001 degrees)
     buffer = 0.001
-    
-    # Find ARUs within bounds
+
+    # Find ARUs within bounds — scoped to colony to prevent cross-colony bleed.
     arus = session.exec(
         select(ARU).where(
+            ARU.colony_id == colony_id,
             ARU.lat >= min_lat - buffer,
             ARU.lat <= max_lat + buffer,
             ARU.lon >= min_lon - buffer,
-            ARU.lon <= max_lon + buffer
+            ARU.lon <= max_lon + buffer,
         )
     ).all()
-    
+
     return list(arus)
 
 
 def generate_fusion_report(
+    colony_id: int,
     session: Session,
     visual_survey_id: int,
     acoustic_survey_id: int = None,
@@ -110,38 +118,60 @@ def generate_fusion_report(
 ) -> Dict[str, Any]:
     """
     Generate a combined analysis report for overlapping survey/ARU data.
-    
+
     Args:
+        colony_id: The active colony id (all queries are scoped to it)
         visual_survey_id: The drone/visual survey ID
         acoustic_survey_id: The acoustic survey ID (optional, uses aru_id if not provided)
         aru_id: The ARU ID to filter acoustic detections (optional)
     """
-    mapping = get_species_color_mapping(session)
-    
-    # Get visual detections for drone survey
+    mapping = get_species_color_mapping(colony_id, session)
+
+    # Verify the visual survey belongs to this colony.
+    visual_survey = session.exec(
+        select(Survey).where(
+            Survey.id == visual_survey_id, Survey.colony_id == colony_id
+        )
+    ).one_or_none()
+    if not visual_survey:
+        return {"error": "Survey not found in colony"}
+
+    # Get visual detections for drone survey — joined to Survey to enforce colony scope.
     visual_query = (
         select(VisualDetection)
-        .join(MediaAsset)
-        .where(MediaAsset.survey_id == visual_survey_id)
+        .join(MediaAsset, VisualDetection.asset_id == MediaAsset.id)
+        .join(Survey, MediaAsset.survey_id == Survey.id)
+        .where(
+            MediaAsset.survey_id == visual_survey_id,
+            Survey.colony_id == colony_id,
+        )
     )
     visual_detections = session.exec(visual_query).all()
-    
-    # Get acoustic detections - either by survey_id or aru_id
+
+    # Get acoustic detections — either by survey_id or aru_id, both scoped to colony.
     if acoustic_survey_id:
         acoustic_query = (
             select(AcousticDetection)
-            .join(MediaAsset)
-            .where(MediaAsset.survey_id == acoustic_survey_id)
+            .join(MediaAsset, AcousticDetection.asset_id == MediaAsset.id)
+            .join(Survey, MediaAsset.survey_id == Survey.id)
+            .where(
+                MediaAsset.survey_id == acoustic_survey_id,
+                Survey.colony_id == colony_id,
+            )
         )
     elif aru_id:
         acoustic_query = (
             select(AcousticDetection)
-            .join(MediaAsset)
-            .where(MediaAsset.aru_id == aru_id)
+            .join(MediaAsset, AcousticDetection.asset_id == MediaAsset.id)
+            .join(ARU, MediaAsset.aru_id == ARU.id)
+            .where(
+                MediaAsset.aru_id == aru_id,
+                ARU.colony_id == colony_id,
+            )
         )
     else:
         acoustic_query = select(AcousticDetection).where(False)  # Empty result
-    
+
     acoustic_detections = session.exec(acoustic_query).all()
     
     # Count visual detections by class

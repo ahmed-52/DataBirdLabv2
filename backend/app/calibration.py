@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from math import cos, radians
+import json
+from math import cos, pi, radians, sqrt
 from typing import Any, Dict, List, Tuple
 from statistics import median
 import re
@@ -76,6 +77,79 @@ def _compute_area_hectares(bounds: Dict[str, float]) -> float:
     return area_m2 / 10_000.0
 
 
+def _approx_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    d_lat = (lat2 - lat1) * 111_320.0
+    mean_lat = (lat1 + lat2) / 2.0
+    d_lon = (lon2 - lon1) * (111_320.0 * max(0.1, cos(radians(mean_lat))))
+    return sqrt((d_lat * d_lat) + (d_lon * d_lon))
+
+
+def _survey_centroid_distance_m(bounds: Dict[str, float], lat: float, lon: float) -> float:
+    center_lat = (bounds["min_lat"] + bounds["max_lat"]) / 2.0
+    center_lon = (bounds["min_lon"] + bounds["max_lon"]) / 2.0
+    return _approx_distance_m(lat, lon, center_lat, center_lon)
+
+
+def _detection_lat_lon(det: VisualDetection, asset: MediaAsset) -> Tuple[float, float] | None:
+    if None in (asset.lat_tl, asset.lat_br, asset.lon_tl, asset.lon_br):
+        return None
+
+    try:
+        bbox = json.loads(det.bbox_json)
+        if not isinstance(bbox, list) or len(bbox) < 4:
+            return None
+        x, y, w, h = [float(v) for v in bbox[:4]]
+    except Exception:
+        return None
+
+    # Detection coordinates are pixel-space in 1280x1280 tiles.
+    cx = x + (w / 2.0)
+    cy = y + (h / 2.0)
+    rel_x = min(1.0, max(0.0, cx / 1280.0))
+    rel_y = min(1.0, max(0.0, cy / 1280.0))
+
+    lat = asset.lat_tl + (rel_y * (asset.lat_br - asset.lat_tl))
+    lon = asset.lon_tl + (rel_x * (asset.lon_br - asset.lon_tl))
+    return (lat, lon)
+
+
+def _drone_local_metrics(
+    session: Session,
+    visual_survey_id: int,
+    aru: ARU,
+    radius_meters: float,
+) -> Dict[str, float]:
+    if radius_meters <= 0:
+        return {
+            "drone_detection_count": 0,
+            "drone_area_hectares": 0.0,
+            "drone_density_per_hectare": 0.0,
+        }
+
+    rows = session.exec(
+        select(VisualDetection, MediaAsset)
+        .join(MediaAsset, VisualDetection.asset_id == MediaAsset.id)
+        .where(MediaAsset.survey_id == visual_survey_id)
+    ).all()
+
+    local_count = 0
+    for det, asset in rows:
+        point = _detection_lat_lon(det, asset)
+        if point is None:
+            continue
+        lat, lon = point
+        if _approx_distance_m(aru.lat, aru.lon, lat, lon) <= radius_meters:
+            local_count += 1
+
+    area_ha = (pi * (radius_meters ** 2)) / 10_000.0
+    density = (local_count / area_ha) if area_ha > 0 else 0.0
+    return {
+        "drone_detection_count": int(local_count),
+        "drone_area_hectares": float(area_ha),
+        "drone_density_per_hectare": float(density),
+    }
+
+
 def _acoustic_metrics(session: Session, acoustic_survey_id: int, aru_id: int) -> Dict[str, float]:
     asset_count = session.exec(
         select(func.count(MediaAsset.id)).where(
@@ -126,23 +200,32 @@ def _drone_metrics(session: Session, visual_survey_id: int) -> Dict[str, float]:
 
 
 def rebuild_calibration_windows(
+    colony_id: int,
     session: Session,
     max_days_apart: int = 14,
     buffer_meters: float = 150.0,
     min_acoustic_calls: int = 1,
 ) -> Dict[str, Any]:
-    session.exec(delete(CalibrationWindow))
+    # Only delete CalibrationWindow rows for this colony.
+    session.exec(delete(CalibrationWindow).where(CalibrationWindow.colony_id == colony_id))
     session.commit()
 
     acoustic_surveys = session.exec(
-        select(Survey).where(Survey.type == "acoustic")
+        select(Survey).where(
+            Survey.type == "acoustic",
+            Survey.colony_id == colony_id,
+        )
     ).all()
     drone_surveys = session.exec(
-        select(Survey).where(Survey.type == "drone")
+        select(Survey).where(
+            Survey.type == "drone",
+            Survey.colony_id == colony_id,
+        )
     ).all()
 
     created = 0
     skipped = 0
+    local_metrics_cache: Dict[Tuple[int, int, float], Dict[str, float]] = {}
 
     for acoustic in acoustic_surveys:
         aru_ids = session.exec(
@@ -163,6 +246,7 @@ def rebuild_calibration_windows(
                 skipped += 1
                 continue
 
+            candidates: List[Dict[str, Any]] = []
             for drone in drone_surveys:
                 if not drone.date or not acoustic.date:
                     skipped += 1
@@ -181,26 +265,65 @@ def rebuild_calibration_windows(
                 ):
                     continue
 
-                drone_m = _drone_metrics(session, drone.id)
+                cache_key = (drone.id, aru_id, float(buffer_meters))
+                drone_m = local_metrics_cache.get(cache_key)
+                if drone_m is None:
+                    drone_m = _drone_local_metrics(
+                        session=session,
+                        visual_survey_id=drone.id,
+                        aru=aru,
+                        radius_meters=buffer_meters,
+                    )
+                    local_metrics_cache[cache_key] = drone_m
+
                 if drone_m["drone_area_hectares"] <= 0:
                     skipped += 1
                     continue
 
-                row = CalibrationWindow(
-                    acoustic_survey_id=acoustic.id,
-                    visual_survey_id=drone.id,
-                    aru_id=aru_id,
-                    days_apart=days_apart,
-                    buffer_meters=buffer_meters,
-                    acoustic_call_count=acoustic_m["acoustic_call_count"],
-                    acoustic_asset_count=acoustic_m["acoustic_asset_count"],
-                    acoustic_calls_per_asset=acoustic_m["acoustic_calls_per_asset"],
-                    drone_detection_count=drone_m["drone_detection_count"],
-                    drone_area_hectares=drone_m["drone_area_hectares"],
-                    drone_density_per_hectare=drone_m["drone_density_per_hectare"],
+                candidates.append(
+                    {
+                        "visual_survey_id": drone.id,
+                        "days_apart": days_apart,
+                        "centroid_distance_m": _survey_centroid_distance_m(
+                            bounds, aru.lat, aru.lon
+                        ),
+                        "drone_detection_count": drone_m["drone_detection_count"],
+                        "drone_area_hectares": drone_m["drone_area_hectares"],
+                        "drone_density_per_hectare": drone_m["drone_density_per_hectare"],
+                    }
                 )
-                session.add(row)
-                created += 1
+
+            if not candidates:
+                skipped += 1
+                continue
+
+            # Simplified pairing: pick one best drone survey per acoustic survey/ARU.
+            best = sorted(
+                candidates,
+                key=lambda c: (
+                    c["days_apart"],
+                    -c["drone_detection_count"],
+                    c["centroid_distance_m"],
+                    c["visual_survey_id"],
+                ),
+            )[0]
+
+            row = CalibrationWindow(
+                colony_id=colony_id,
+                acoustic_survey_id=acoustic.id,
+                visual_survey_id=best["visual_survey_id"],
+                aru_id=aru_id,
+                days_apart=best["days_apart"],
+                buffer_meters=buffer_meters,
+                acoustic_call_count=acoustic_m["acoustic_call_count"],
+                acoustic_asset_count=acoustic_m["acoustic_asset_count"],
+                acoustic_calls_per_asset=acoustic_m["acoustic_calls_per_asset"],
+                drone_detection_count=best["drone_detection_count"],
+                drone_area_hectares=best["drone_area_hectares"],
+                drone_density_per_hectare=best["drone_density_per_hectare"],
+            )
+            session.add(row)
+            created += 1
 
     session.commit()
 
@@ -214,13 +337,17 @@ def rebuild_calibration_windows(
 
 
 def list_calibration_windows(
+    colony_id: int,
     session: Session,
     min_calls: int = 0,
     limit: int = 200,
 ) -> List[Dict[str, Any]]:
     rows = session.exec(
         select(CalibrationWindow)
-        .where(CalibrationWindow.acoustic_call_count >= min_calls)
+        .where(
+            CalibrationWindow.colony_id == colony_id,
+            CalibrationWindow.acoustic_call_count >= min_calls,
+        )
         .order_by(CalibrationWindow.days_apart.asc(), CalibrationWindow.id.desc())
         .limit(limit)
     ).all()
@@ -249,10 +376,13 @@ def list_calibration_windows(
 
 
 def calibration_curve_summary(
-    session: Session, min_calls: int = 1
+    colony_id: int, session: Session, min_calls: int = 1
 ) -> Dict[str, Any]:
     rows = session.exec(
-        select(CalibrationWindow).where(CalibrationWindow.acoustic_call_count >= min_calls)
+        select(CalibrationWindow).where(
+            CalibrationWindow.colony_id == colony_id,
+            CalibrationWindow.acoustic_call_count >= min_calls,
+        )
     ).all()
 
     if not rows:
@@ -282,7 +412,7 @@ def calibration_curve_summary(
         "window_count": len(rows),
         "usable_count": len(ratios),
         "simple_factor_density_per_call_per_asset": factor,
-        "notes": "MVP calibration factor (median(y/x)); replace with stronger model later.",
+        "notes": "Median ratio using local drone density (ARU-radius area) over acoustic calls/asset.",
         "sample_pairs": pairs[:50],
     }
 
@@ -342,12 +472,16 @@ def _top_species_for_windows(
 
 
 def build_calibration_feature_rows(
+    colony_id: int,
     session: Session,
     min_calls: int = 1,
     top_species: int = 5,
 ) -> Dict[str, Any]:
     windows = session.exec(
-        select(CalibrationWindow).where(CalibrationWindow.acoustic_call_count >= min_calls)
+        select(CalibrationWindow).where(
+            CalibrationWindow.colony_id == colony_id,
+            CalibrationWindow.acoustic_call_count >= min_calls,
+        )
     ).all()
     if not windows:
         return {"rows": [], "feature_names": [], "species_features": []}
@@ -444,12 +578,13 @@ def _metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
 
 
 def calibration_backtest_report(
+    colony_id: int,
     session: Session,
     min_calls: int = 1,
     top_species: int = 5,
 ) -> Dict[str, Any]:
     data = build_calibration_feature_rows(
-        session=session, min_calls=min_calls, top_species=top_species
+        colony_id=colony_id, session=session, min_calls=min_calls, top_species=top_species
     )
     rows = data["rows"]
     feature_names = data["feature_names"]
@@ -457,6 +592,15 @@ def calibration_backtest_report(
         return {
             "window_count": len(rows),
             "message": "Not enough windows for grouped backtest (need >= 3).",
+            "feature_names": feature_names,
+            "folds": [],
+        }
+
+    target_values = {round(float(r["target_density_per_hectare"]), 6) for r in rows}
+    if len(target_values) < 2:
+        return {
+            "window_count": len(rows),
+            "message": "Insufficient local density variation for backtest. Add more spatially distinct paired windows.",
             "feature_names": feature_names,
             "folds": [],
         }
@@ -536,12 +680,13 @@ def calibration_backtest_report(
 
 
 def calibration_train_summary(
+    colony_id: int,
     session: Session,
     min_calls: int = 1,
     top_species: int = 5,
 ) -> Dict[str, Any]:
     data = build_calibration_feature_rows(
-        session=session, min_calls=min_calls, top_species=top_species
+        colony_id=colony_id, session=session, min_calls=min_calls, top_species=top_species
     )
     rows = data["rows"]
     feature_names = data["feature_names"]
@@ -549,6 +694,25 @@ def calibration_train_summary(
         return {"window_count": 0, "message": "No windows available for training."}
 
     X, y = _matrix_from_rows(rows, feature_names)
+
+    if float(np.var(y)) < 1e-9:
+        baseline = float(np.mean(y)) if y.size else 0.0
+        base_pred = np.full_like(y, baseline)
+        linear_model = {"intercept": baseline, "coef": [0.0 for _ in feature_names]}
+        quad_model = {"a0": baseline, "a1": 0.0, "a2": 0.0}
+        return {
+            "window_count": len(rows),
+            "feature_names": feature_names,
+            "species_features": data["species_features"],
+            "linear_model": linear_model,
+            "quadratic_model": quad_model,
+            "linear_metrics_train": _metrics(y, base_pred),
+            "quadratic_metrics_train": _metrics(y, base_pred),
+            "recommended_model": "linear",
+            "residual_std_density_per_hectare": 0.0,
+            "message": "Local target density is nearly constant across windows. Collect more diverse paired drone coverage.",
+        }
+
     linear_model = _fit_linear_model(X, y)
     quad_model = _fit_quadratic_total_call_model(X, y)
 
@@ -576,6 +740,7 @@ def calibration_train_summary(
 
 
 def calibration_predict_density(
+    colony_id: int,
     session: Session,
     acoustic_survey_id: int,
     aru_id: int,
@@ -584,13 +749,13 @@ def calibration_predict_density(
     top_species: int = 5,
 ) -> Dict[str, Any]:
     train = calibration_train_summary(
-        session=session, min_calls=min_calls, top_species=top_species
+        colony_id=colony_id, session=session, min_calls=min_calls, top_species=top_species
     )
     if train.get("window_count", 0) == 0:
         return {"message": "No calibration windows available for prediction."}
 
     data = build_calibration_feature_rows(
-        session=session, min_calls=min_calls, top_species=top_species
+        colony_id=colony_id, session=session, min_calls=min_calls, top_species=top_species
     )
     feature_names = data["feature_names"]
     species = data["species_features"]
@@ -625,7 +790,7 @@ def calibration_predict_density(
         model_name = "linear"
 
     resid_std = float(train.get("residual_std_density_per_hectare", 0.0))
-    return {
+    result = {
         "acoustic_survey_id": acoustic_survey_id,
         "aru_id": aru_id,
         "model_used": model_name,
@@ -638,3 +803,6 @@ def calibration_predict_density(
         "effort_hours_estimated": effort_h,
         "training_window_count": train.get("window_count", 0),
     }
+    if train.get("message"):
+        result["training_message"] = train["message"]
+    return result

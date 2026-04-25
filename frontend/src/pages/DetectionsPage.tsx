@@ -12,6 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
+import { apiClient } from "@/lib/apiClient"
 
 export default function DetectionsPage() {
   const [visualData, setVisualData] = useState<any[]>([])
@@ -26,12 +27,14 @@ export default function DetectionsPage() {
   useEffect(() => {
     setLoading(true)
     Promise.all([
-      fetch("/api/detections/visual?days=30").then((r) => r.json()),
-      fetch("/api/detections/acoustic?days=30").then((r) => r.json()),
+      apiClient.get("/api/detections/visual?days=365"),
+      apiClient.get("/api/detections/acoustic?days=365"),
     ])
       .then(([visual, acoustic]) => {
-        setVisualData(visual.map((d: any) => ({ ...d, type: "visual" })))
-        setAcousticData(acoustic.map((d: any) => ({ ...d, type: "acoustic" })))
+        const vArr = Array.isArray(visual) ? visual : []
+        const aArr = Array.isArray(acoustic) ? acoustic : []
+        setVisualData(vArr.map((d: any) => ({ ...d, type: "visual" })))
+        setAcousticData(aArr.map((d: any) => ({ ...d, type: "acoustic" })))
       })
       .catch(console.error)
       .finally(() => setLoading(false))

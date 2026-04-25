@@ -25,3 +25,7 @@ dist-ssr
 
 SKILL.md
 DESIGN_SYSTEM.md
+
+.env.production
+.env.local
+!.env.production.example

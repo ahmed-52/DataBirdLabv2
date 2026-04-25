@@ -1,3 +1,5 @@
+import { apiClient } from "./lib/apiClient";
+
 // Re-export interfaces for use in components
 export interface VisualDetection {
     id: string;
@@ -31,9 +33,8 @@ export let acousticDetections: AcousticDetection[] = [];
 
 export const fetchSurveys = async () => {
     try {
-        const res = await fetch('/api/surveys');
-        if (!res.ok) throw new Error('Failed to fetch surveys');
-        return await res.json();
+        const data = await apiClient.get('/api/surveys');
+        return Array.isArray(data) ? data : [];
     } catch (e) {
         console.error(e);
         return [];
@@ -47,16 +48,16 @@ export const fetchEcologicalData = async (days = 7, surveyIds: number[] = []) =>
             query += `&survey_ids=${surveyIds.join(',')}`;
         }
 
-        const [visRes, audRes] = await Promise.all([
-            fetch(`/api/detections/visual${query}`),
-            fetch(`/api/detections/acoustic${query}`)
+        const [visData, audData] = await Promise.all([
+            apiClient.get(`/api/detections/visual${query}`).catch(() => []),
+            apiClient.get(`/api/detections/acoustic${query}`).catch(() => [])
         ]);
 
-        if (visRes.ok) {
-            visualDetections = await visRes.json();
+        if (Array.isArray(visData)) {
+            visualDetections = visData;
         }
-        if (audRes.ok) {
-            acousticDetections = await audRes.json();
+        if (Array.isArray(audData)) {
+            acousticDetections = audData;
         }
 
         return { visualDetections, acousticDetections };

@@ -7,6 +7,7 @@ import { useEffect } from 'react';
 import HeatmapLayer from './HeatmapLayer';
 import DensityControl from './DensityControl';
 import SpeciesDensityLayer, { getDroneSpeciesLegend } from './SpeciesDensityLayer';
+import { useCurrentColony } from '@/contexts/CurrentColonyContext';
 
 const ACOUSTIC_GRADIENT: Record<number, string> = {
     0.0: 'transparent',
@@ -77,13 +78,22 @@ const UnifiedMap: React.FC<UnifiedMapProps> = ({
     surveys = [],
     autoZoom = true
 }) => {
+    const { currentColony } = useCurrentColony();
 
-    const centerPos: [number, number] = [11.40547, 105.39735];
+    const centerPos: [number, number] = currentColony
+        ? [currentColony.lat, currentColony.lon]
+        : [11.40547, 105.39735];
 
-    const mapBounds: L.LatLngBoundsExpression = [
-        [11.39, 105.37],
-        [11.43, 105.42]
-    ];
+    // Roughly +/-0.02 deg around colony center
+    const mapBounds: L.LatLngBoundsExpression = currentColony
+        ? [
+            [currentColony.lat - 0.02, currentColony.lon - 0.025],
+            [currentColony.lat + 0.02, currentColony.lon + 0.025],
+          ]
+        : [
+            [11.39, 105.37],
+            [11.43, 105.42],
+          ];
 
     // ── Density layer visibility + opacity state ─────────────────────────────
     const [droneHeatVisible, setDroneHeatVisible] = useState(true);

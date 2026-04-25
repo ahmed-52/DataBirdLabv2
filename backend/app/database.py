@@ -1,12 +1,20 @@
-from sqlmodel import create_engine, SQLModel
-from pathlib import Path
+import os
+from sqlmodel import SQLModel, create_engine
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-sqlite_file_name = BASE_DIR / "data" / "db.sqlite"
-sqlite_url = f"sqlite:///{sqlite_file_name}"
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./data/db.sqlite")
 
-engine = create_engine(sqlite_url, echo=False)
+if DATABASE_URL.startswith("postgresql"):
+    engine = create_engine(
+        DATABASE_URL,
+        pool_size=5,
+        max_overflow=2,
+        pool_pre_ping=True,
+        pool_recycle=300,
+    )
+else:
+    # SQLite for local dev
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+
 
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
-

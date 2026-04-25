@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 from sqlmodel import Session, select
 from app.database import engine
-from app.models import MediaAsset, AcousticDetection, SystemSettings
+from app.models import MediaAsset, AcousticDetection, Survey, Colony
 from birdnetlib import Recording
 from birdnetlib.analyzer import Analyzer
 
@@ -38,9 +38,9 @@ class BirdNetPipeline(Pipeline):
         from sqlmodel import Session
         from app.database import engine
         from app.models import ARU
-        
+
         lat_tl, lon_tl = None, None
-        
+
         # Get GPS coordinates from ARU if provided
         if aru_id:
             with Session(engine) as session:
@@ -48,10 +48,19 @@ class BirdNetPipeline(Pipeline):
                 if aru:
                     lat_tl = aru.lat
                     lon_tl = aru.lon
-        
+
+        # Normalize file_path to a colony-relative path so storage.url_for()
+        # can resolve it. The caller (main.py) already uploaded the file via
+        # storage_module.upload(); we just need to record the relative path.
+        rel_path = input_path
+        if "static/" in rel_path:
+            rel_path = rel_path.split("static/", 1)[1]
+        rel_path = rel_path.lstrip("/")
+
         # Dictionary to hold the asset metadata
         asset_meta = {
-            "file_path": input_path,
+            "file_path": rel_path,
+            "absolute_path": input_path,  # used by run_inference to load the file
             "lat_tl": lat_tl,
             "lon_tl": lon_tl,
             "lat_br": None,
@@ -85,17 +94,23 @@ class BirdNetPipeline(Pipeline):
         import datetime as dt_module
 
         with Session(engine) as session:
-            # Fetch System configuration
-            settings = session.get(SystemSettings, 1)
-            # Default values if db is empty (shouldn't be due to api defaults, but safe fallback)
-            # Use pipeline override if set, otherwise fall back to SystemSettings
+            # Resolve colony-scoped config for this survey. The Colony FK is
+            # required on Survey, so colony.lat/lon are guaranteed.
+            survey = session.get(Survey, survey_id)
+            if not survey:
+                raise ValueError(f"Survey {survey_id} not found")
+            colony = session.get(Colony, survey.colony_id)
+            if not colony:
+                raise ValueError(f"Colony {survey.colony_id} not found for survey {survey_id}")
+
+            # Use pipeline override if set, otherwise fall back to colony.min_confidence.
             if self.analysis_min_conf is not None:
                 min_conf = self.analysis_min_conf
             else:
-                min_conf = settings.min_confidence if settings else 0.25
-            d_lat = settings.default_lat if settings else 11.406949
-            d_lon = settings.default_lon if settings else 105.394883
-            custom_model = settings.acoustic_model_path if settings else None
+                min_conf = colony.min_confidence if colony.min_confidence is not None else 0.25
+            d_lat = colony.lat
+            d_lon = colony.lon
+            custom_model = colony.acoustic_model_path
             
             # Re-initialize analyzer if custom model provided and different?
             # For simplicity, let's just make a local analyzer instance here if dealing with custom models,
@@ -119,10 +134,19 @@ class BirdNetPipeline(Pipeline):
             assets = session.exec(statement).all()
 
             for asset in assets:
-                input_path = asset.file_path
-                if not os.path.exists(input_path):
-                     print(f"File not found: {input_path}")
-                     continue
+                # MediaAsset.file_path is now a colony-relative path
+                # (e.g. "uploads/survey_3/audio/foo.wav"). In local-mode storage
+                # the file lives at static/<rel_path>; resolve both shapes.
+                stored_path = asset.file_path
+                if os.path.exists(stored_path):
+                    input_path = stored_path
+                elif stored_path.startswith("static/") and os.path.exists(stored_path):
+                    input_path = stored_path
+                elif os.path.exists(os.path.join("static", stored_path)):
+                    input_path = os.path.join("static", stored_path)
+                else:
+                    print(f"File not found: {stored_path}")
+                    continue
 
                 # Parse date from filename for Recording object
                 # Formats:

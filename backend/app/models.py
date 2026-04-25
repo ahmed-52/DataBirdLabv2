@@ -7,24 +7,28 @@ from datetime import datetime
 class ARU(SQLModel, table=True):
     """Acoustic Recording Unit - predefined or custom locations"""
     id: Optional[int] = Field(default=None, primary_key=True)
+    colony_id: int = Field(foreign_key="colony.id", index=True)
     name: str
     lat: float
     lon: float
-    
+
     # Relationships
+    colony: "Colony" = Relationship(back_populates="arus")
     media_assets: List["MediaAsset"] = Relationship(back_populates="aru")
 
 
 class Survey(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    colony_id: int = Field(foreign_key="colony.id", index=True)
     name: str
     date: datetime = Field(default_factory=datetime.now)
     type: str # 'drone' or 'acoustic'
-    
+
     # Status tracking
     status: str = Field(default="pending") # pending, processing, completed, failed
     error_message: Optional[str] = None
-    
+
+    colony: "Colony" = Relationship(back_populates="surveys")
     media: List["MediaAsset"] = Relationship(back_populates="survey")
 
 
@@ -128,6 +132,7 @@ class CalibrationWindow(SQLModel, table=True):
     Each row links one ARU acoustic survey window with one nearby drone survey.
     """
     id: Optional[int] = Field(default=None, primary_key=True)
+    colony_id: int = Field(foreign_key="colony.id", index=True)
 
     # Pair references
     acoustic_survey_id: int = Field(foreign_key="survey.id")
@@ -149,3 +154,23 @@ class CalibrationWindow(SQLModel, table=True):
     drone_density_per_hectare: float = 0.0
 
     created_at: datetime = Field(default_factory=datetime.now)
+
+
+class Colony(SQLModel, table=True):
+    """A study site / monitoring colony. Each Survey, ARU, and detection is scoped to one colony."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    slug: str = Field(unique=True, index=True, description="URL-safe handle, immutable after creation")
+    name: str
+    description: Optional[str] = None
+    lat: float
+    lon: float
+    species_color_mapping: Optional[str] = None  # JSON string
+    visual_model_path: Optional[str] = None
+    acoustic_model_path: Optional[str] = None
+    min_confidence: float = 0.25
+    tile_size: int = 1280
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=datetime.now)
+
+    surveys: List["Survey"] = Relationship(back_populates="colony")
+    arus: List["ARU"] = Relationship(back_populates="colony")

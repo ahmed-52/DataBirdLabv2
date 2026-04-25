@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { MapContainer, TileLayer, Polygon, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { useCurrentColony } from '@/contexts/CurrentColonyContext';
 
 
 const FitBounds = ({ surveys }) => {
@@ -33,8 +34,10 @@ const FitBounds = ({ surveys }) => {
 
 const ColonyMap = ({ surveys }) => {
     // surveys prop should be the filtered list of surveys we want to display coverage for
-    // Center of Boeung Sne default
-    const defaultCenter = [11.407590, 105.395620];
+    const { currentColony } = useCurrentColony();
+    const defaultCenter = currentColony
+        ? [currentColony.lat, currentColony.lon]
+        : [11.407590, 105.395620];
 
     return (
         <MapContainer

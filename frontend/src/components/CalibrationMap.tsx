@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, Rectangle, CircleMarker, Polyline, Tooltip } f
 import type { LatLngExpression } from "leaflet"
 import "leaflet/dist/leaflet.css"
 import type { ARU, CalibrationWindow, Survey } from "@/types"
+import { useCurrentColony } from "@/contexts/CurrentColonyContext"
 
 interface CalibrationMapProps {
     windows: CalibrationWindow[]
@@ -35,6 +36,7 @@ export default function CalibrationMap({
     selectedWindowId,
     onSelectWindow,
 }: CalibrationMapProps) {
+    const { currentColony } = useCurrentColony()
     const densityStats = useMemo(() => {
         const vals = windows.map((w) => w.drone_density_per_hectare).filter((v) => Number.isFinite(v))
         if (vals.length === 0) return { min: 0, max: 1 }
@@ -59,8 +61,9 @@ export default function CalibrationMap({
         if (first?.bounds?.min_lat != null && first?.bounds?.min_lon != null) {
             return [first.bounds.min_lat, first.bounds.min_lon]
         }
+        if (currentColony) return [currentColony.lat, currentColony.lon]
         return [11.40547, 105.39735]
-    }, [arus, surveys])
+    }, [arus, surveys, currentColony])
 
     const uniqueSurveyIds = Array.from(new Set(windows.map((w) => w.visual_survey_id)))
 

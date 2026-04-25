@@ -33,7 +33,7 @@ ordered-set==4.1.0
 packaging==26.0
 pandas==3.0.0
 pillow==12.1.0
-protobuf==6.33.5
+protobuf<6.0
 psutil==7.2.2
 pyarrow==23.0.0
 pycparser==3.0
@@ -64,3 +64,8 @@ uvicorn==0.40.0
 Werkzeug==3.1.5
 wheel==0.46.3
 wrapt==2.1.1
+PyJWT[crypto]==2.10.1
+google-cloud-storage==2.18.2
+google-cloud-run==0.10.16
+psycopg2-binary==2.9.10
+httpx==0.28.1

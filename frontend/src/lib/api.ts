@@ -3,6 +3,7 @@
 
 import type {
     Survey,
+    SurveyMapDetection,
     VisualDetection,
     AcousticDetection,
     ARU,
@@ -12,26 +13,24 @@ import type {
     CalibrationSummary,
     CalibrationBacktestReport,
 } from "@/types"
-
-const API_BASE = "" // Uses Vite proxy, no need for http://localhost:8000
+import { apiClient } from "./apiClient"
 
 // --- Surveys ---
 
 export async function fetchSurveys(): Promise<Survey[]> {
-    const res = await fetch(`${API_BASE}/api/surveys`)
-    if (!res.ok) throw new Error("Failed to fetch surveys")
-    return res.json()
+    return apiClient.get(`/api/surveys`)
 }
 
 export async function deleteSurvey(surveyId: number): Promise<void> {
-    const res = await fetch(`${API_BASE}/api/surveys/${surveyId}`, { method: "DELETE" })
-    if (!res.ok) throw new Error("Failed to delete survey")
+    await apiClient.delete(`/api/surveys/${surveyId}`)
 }
 
 export async function fetchSurveyStatus(surveyId: number) {
-    const res = await fetch(`${API_BASE}/api/surveys/${surveyId}/status`)
-    if (!res.ok) throw new Error("Failed to fetch survey status")
-    return res.json()
+    return apiClient.get(`/api/surveys/${surveyId}/status`)
+}
+
+export async function fetchSurveyMapData(surveyId: number): Promise<SurveyMapDetection[]> {
+    return apiClient.get(`/api/surveys/${surveyId}/map_data`)
 }
 
 // --- Detections ---
@@ -40,26 +39,22 @@ export async function fetchVisualDetections(
     days: number = 7,
     surveyIds?: number[]
 ): Promise<VisualDetection[]> {
-    let url = `${API_BASE}/api/detections/visual?days=${days}`
+    let url = `/api/detections/visual?days=${days}`
     if (surveyIds && surveyIds.length > 0) {
         url += `&survey_ids=${surveyIds.join(",")}`
     }
-    const res = await fetch(url)
-    if (!res.ok) throw new Error("Failed to fetch visual detections")
-    return res.json()
+    return apiClient.get(url)
 }
 
 export async function fetchAcousticDetections(
     days: number = 7,
     surveyIds?: number[]
 ): Promise<AcousticDetection[]> {
-    let url = `${API_BASE}/api/detections/acoustic?days=${days}`
+    let url = `/api/detections/acoustic?days=${days}`
     if (surveyIds && surveyIds.length > 0) {
         url += `&survey_ids=${surveyIds.join(",")}`
     }
-    const res = await fetch(url)
-    if (!res.ok) throw new Error("Failed to fetch acoustic detections")
-    return res.json()
+    return apiClient.get(url)
 }
 
 // Convenience function to fetch both
@@ -77,9 +72,7 @@ export async function fetchEcologicalData(
 // --- ARUs ---
 
 export async function fetchARUs(): Promise<ARU[]> {
-    const res = await fetch(`${API_BASE}/api/arus`)
-    if (!res.ok) throw new Error("Failed to fetch ARUs")
-    return res.json()
+    return apiClient.get(`/api/arus`)
 }
 
 export async function fetchARUDetections(
@@ -87,39 +80,31 @@ export async function fetchARUDetections(
     days: number = 7,
     surveyIds?: number[]
 ): Promise<AcousticDetection[]> {
-    let url = `${API_BASE}/api/arus/${aruId}/detections?days=${days}`
+    let url = `/api/arus/${aruId}/detections?days=${days}`
     if (surveyIds && surveyIds.length > 0) {
         url += `&survey_ids=${surveyIds.join(",")}`
     }
-    const res = await fetch(url)
-    if (!res.ok) throw new Error("Failed to fetch ARU detections")
-    return res.json()
+    return apiClient.get(url)
 }
 
 // --- Stats ---
 
 export async function fetchSpeciesStats(days: number = 7, surveyId?: number) {
-    let url = `${API_BASE}/api/stats/species?days=${days}`
+    let url = `/api/stats/species?days=${days}`
     if (surveyId) url += `&survey_id=${surveyId}`
-    const res = await fetch(url)
-    if (!res.ok) throw new Error("Failed to fetch species stats")
-    return res.json()
+    return apiClient.get(url)
 }
 
 export async function fetchOverviewStats(days: number = 7, surveyId?: number) {
-    let url = `${API_BASE}/api/stats/overview?days=${days}`
+    let url = `/api/stats/overview?days=${days}`
     if (surveyId) url += `&survey_id=${surveyId}`
-    const res = await fetch(url)
-    if (!res.ok) throw new Error("Failed to fetch overview stats")
-    return res.json()
+    return apiClient.get(url)
 }
 
 export async function fetchHourlyActivity(surveyId: number, aruId?: number) {
-    let url = `${API_BASE}/api/acoustic/activity/hourly?survey_id=${surveyId}`
+    let url = `/api/acoustic/activity/hourly?survey_id=${surveyId}`
     if (aruId) url += `&aru_id=${aruId}`
-    const res = await fetch(url)
-    if (!res.ok) throw new Error("Failed to fetch hourly activity")
-    return res.json()
+    return apiClient.get(url)
 }
 
 export async function fetchSpeciesHistory(
@@ -127,37 +112,38 @@ export async function fetchSpeciesHistory(
     days: number = 7,
     type: "visual" | "acoustic" = "visual"
 ) {
-    const url = `${API_BASE}/api/stats/species_history?species_name=${encodeURIComponent(speciesName)}&days=${days}&type=${type}`
-    const res = await fetch(url)
-    if (!res.ok) throw new Error("Failed to fetch species history")
-    return res.json()
+    const url = `/api/stats/species_history?species_name=${encodeURIComponent(speciesName)}&days=${days}&type=${type}`
+    return apiClient.get(url)
 }
 
 export async function fetchSpeciesList(type: "visual" | "acoustic" = "visual") {
-    const url = `${API_BASE}/api/species_list?type=${type}`
-    const res = await fetch(url)
-    if (!res.ok) throw new Error("Failed to fetch species list")
-    return res.json()
+    return apiClient.get(`/api/species_list?type=${type}`)
 }
 
 // --- Settings ---
 
 export async function fetchSettings(): Promise<SystemSettings> {
-    const res = await fetch(`${API_BASE}/api/settings`)
-    if (!res.ok) throw new Error("Failed to fetch settings")
-    return res.json()
+    return apiClient.get(`/api/settings`)
 }
 
 export async function updateSettings(
     settings: Partial<SystemSettings>
 ): Promise<SystemSettings> {
-    const res = await fetch(`${API_BASE}/api/settings`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings),
-    })
-    if (!res.ok) throw new Error("Failed to update settings")
-    return res.json()
+    // PUT verb is not exposed by apiClient — use patch as semantically closest
+    // backend accepts both POST and PUT for /api/settings, so use POST to align
+    return apiClient.post(`/api/settings`, settings)
+}
+
+export async function fetchSpeciesColorMapping(): Promise<Record<string, string[]>> {
+    const data = await apiClient.get(`/api/settings/species_colors`)
+    return data?.mapping ?? {}
+}
+
+export async function updateSpeciesColorMapping(
+    mapping: Record<string, string[]>
+): Promise<Record<string, string[]>> {
+    const data = await apiClient.post(`/api/settings/species_colors`, mapping)
+    return data?.mapping ?? mapping
 }
 
 // --- Fusion ---
@@ -166,24 +152,14 @@ export async function fetchFusionReport(
     visualSurveyId: number,
     acousticSurveyId: number
 ): Promise<FusionReport> {
-    const url = `${API_BASE}/api/fusion/report?visual_survey_id=${visualSurveyId}&acoustic_survey_id=${acousticSurveyId}`
-    const res = await fetch(url)
-    if (!res.ok) throw new Error("Failed to fetch fusion report")
-    return res.json()
+    const url = `/api/fusion/report?visual_survey_id=${visualSurveyId}&acoustic_survey_id=${acousticSurveyId}`
+    return apiClient.get(url)
 }
 
 // --- Survey Import (Multipart) ---
 
 export async function importSurvey(formData: FormData) {
-    const res = await fetch(`${API_BASE}/api/surveys/import`, {
-        method: "POST",
-        body: formData,
-    })
-    if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || "Failed to import survey")
-    }
-    return res.json()
+    return apiClient.post(`/api/surveys/import`, formData)
 }
 
 // --- Calibration ---
@@ -205,11 +181,7 @@ export async function rebuildCalibrationWindows(params?: {
     }
 
     const suffix = query.toString() ? `?${query.toString()}` : ""
-    const res = await fetch(`${API_BASE}/api/calibration/windows/rebuild${suffix}`, {
-        method: "POST",
-    })
-    if (!res.ok) throw new Error("Failed to rebuild calibration windows")
-    return res.json()
+    return apiClient.post(`/api/calibration/windows/rebuild${suffix}`, {})
 }
 
 export async function fetchCalibrationWindows(params?: {
@@ -221,15 +193,11 @@ export async function fetchCalibrationWindows(params?: {
     if (params?.limit !== undefined) query.set("limit", String(params.limit))
     const suffix = query.toString() ? `?${query.toString()}` : ""
 
-    const res = await fetch(`${API_BASE}/api/calibration/windows${suffix}`)
-    if (!res.ok) throw new Error("Failed to fetch calibration windows")
-    return res.json()
+    return apiClient.get(`/api/calibration/windows${suffix}`)
 }
 
 export async function fetchCalibrationSummary(minCalls: number = 1): Promise<CalibrationSummary> {
-    const res = await fetch(`${API_BASE}/api/calibration/summary?min_calls=${minCalls}`)
-    if (!res.ok) throw new Error("Failed to fetch calibration summary")
-    return res.json()
+    return apiClient.get(`/api/calibration/summary?min_calls=${minCalls}`)
 }
 
 export async function fetchCalibrationBacktest(params?: {
@@ -241,7 +209,5 @@ export async function fetchCalibrationBacktest(params?: {
     if (params?.top_species !== undefined) query.set("top_species", String(params.top_species))
     const suffix = query.toString() ? `?${query.toString()}` : ""
 
-    const res = await fetch(`${API_BASE}/api/calibration/backtest${suffix}`)
-    if (!res.ok) throw new Error("Failed to fetch calibration backtest")
-    return res.json()
+    return apiClient.get(`/api/calibration/backtest${suffix}`)
 }

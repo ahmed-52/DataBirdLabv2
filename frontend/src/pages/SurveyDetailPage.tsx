@@ -11,9 +11,12 @@ import UnifiedMap from "@/components/UnifiedMap"
 import { Separator } from "@/components/ui/separator"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import InspectorPanel from "@/components/InspectorPanel"
+import { apiClient } from "@/lib/apiClient"
+import { useCurrentColony } from "@/contexts/CurrentColonyContext"
 
 export default function SurveyDetailPage() {
   const { surveyId: id } = useParams()
+  const { currentColony } = useCurrentColony()
   const [survey, setSurvey] = useState<any>(null)
   const [visualDetections, setVisualDetections] = useState<any[]>([])
   const [acousticDetections, setAcousticDetections] = useState<any[]>([])
@@ -25,20 +28,19 @@ export default function SurveyDetailPage() {
     if (!id) return
     setLoading(true)
 
-    // Simulate fetching survey details + detections
-    // In a real app, these would be proper API calls
+    const safeGet = async <T,>(path: string, fallback: T): Promise<T> => {
+      try {
+        return (await apiClient.get(path)) as T
+      } catch (err) {
+        console.warn(`API call failed: ${path}`, err)
+        return fallback
+      }
+    }
+
     Promise.all([
-      // Fetch survey metadata
-      fetch(`/api/surveys/${id}`).then(res => {
-        if (!res.ok) throw new Error('Survey not found')
-        return res.json()
-      }).catch(err => {
-        console.warn("Survey fetch failed", err)
-        return null
-      }),
-      // Fetch detections with robust handling
-      fetch(`/api/detections/visual?survey_ids=${id}&days=3650`).then(res => res.ok ? res.json() : []).catch(() => []),
-      fetch(`/api/detections/acoustic?survey_ids=${id}&days=3650`).then(res => res.ok ? res.json() : []).catch(() => [])
+      safeGet<any | null>(`/api/surveys/${id}`, null),
+      safeGet<any[]>(`/api/detections/visual?survey_ids=${id}&days=3650`, []),
+      safeGet<any[]>(`/api/detections/acoustic?survey_ids=${id}&days=3650`, []),
     ])
       .then(([surveyData, visual, acoustic]) => {
         // Fallback if survey endpoint not ready
@@ -47,7 +49,7 @@ export default function SurveyDetailPage() {
           name: `Orthomosaic Mission ${id}`,
           date: new Date().toISOString(),
           status: "completed",
-          area: "Boeung Sne Restricted Zone",
+          area: `${currentColony?.name ?? "Unknown"} Restricted Zone`,
           notes: "Routine aerial surveillance and acoustic monitoring."
         }
         setSurvey(sData)
@@ -64,7 +66,7 @@ export default function SurveyDetailPage() {
       })
       .finally(() => setLoading(false))
 
-  }, [id])
+  }, [id, currentColony])
 
   const filteredDetections = useMemo(() => {
     const all = [...visualDetections, ...acousticDetections]

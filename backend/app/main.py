@@ -1,12 +1,15 @@
 import os
 import shutil
+import tempfile
 from datetime import date
-from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import FastAPI, APIRouter, UploadFile, File, Form, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from sqlmodel import Session
 from app.database import engine, create_db_and_tables
-from app.models import Survey, MediaAsset, VisualDetection, AcousticDetection, ARU, SystemSettings, CalibrationWindow
+from app.models import Survey, MediaAsset, VisualDetection, AcousticDetection, ARU, SystemSettings, CalibrationWindow, Colony
+from app.auth import get_current_user
+from app import storage as storage_module
 
 from typing import Optional
 from sqlmodel import select, func
@@ -16,6 +19,34 @@ from pipeline import PipelineManager
 import json
 from multiprocessing import Process
 from fastapi.middleware.cors import CORSMiddleware
+
+# PIPELINE_MODE controls whether pipeline execution runs in-process (local dev)
+# or via a Cloud Run Job (prod). Defaults to "inline" so local dev keeps working.
+PIPELINE_MODE = os.environ.get("PIPELINE_MODE", "inline")  # inline | cloudrun
+CLOUDRUN_JOB_NAME = os.environ.get(
+    "CLOUDRUN_PIPELINE_JOB",
+    "projects/databirdlabel/locations/us-central1/jobs/pipeline-job",
+)
+
+
+def _trigger_cloudrun_pipeline(survey_id: int, pipeline_type: str, input_path: str, aru_id: Optional[int] = None):
+    """Fire-and-forget invocation of the pipeline Cloud Run Job."""
+    from google.cloud import run_v2
+
+    client = run_v2.JobsClient()
+    args = [
+        "--survey-id", str(survey_id),
+        "--pipeline-type", pipeline_type,
+        "--input-path", input_path,
+    ]
+    if aru_id is not None:
+        args.extend(["--aru-id", str(aru_id)])
+
+    overrides = run_v2.RunJobRequest.Overrides(
+        container_overrides=[run_v2.RunJobRequest.Overrides.ContainerOverride(args=args)]
+    )
+    client.run_job(name=CLOUDRUN_JOB_NAME, overrides=overrides)
+
 
 app = FastAPI(title="DataBirdLab API")
 
@@ -27,6 +58,19 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
+
+@app.get("/api/health")
+def health():
+    """Liveness probe — no auth required."""
+    return {"ok": True}
+
+
+# Apply auth dependency to ALL other routes via a router.
+# Every `@app.get/post/...` below that is NOT `/api/health` uses `@api.*`
+# so the global Depends(get_current_user) applies.
+api = APIRouter(prefix="", dependencies=[Depends(get_current_user)])
+
+
 @app.on_event("startup")
 def on_startup():
     create_db_and_tables()
@@ -37,6 +81,20 @@ def get_session():
     with Session(engine) as session:
         yield session
 
+
+def get_colony(
+    colony_slug: str,
+    session: Session = Depends(get_session),
+) -> Colony:
+    """FastAPI dependency: resolve `colony_slug` query param to an active Colony row."""
+    colony = session.exec(
+        select(Colony).where(Colony.slug == colony_slug, Colony.is_active == True)
+    ).one_or_none()
+    if not colony:
+        raise HTTPException(status_code=404, detail=f"Colony '{colony_slug}' not found")
+    return colony
+
+
 def run_in_process(target, **kwargs):
     """Helper to run a function in a separate process to avoid blocking the main thread"""
     p = Process(target=target, kwargs=kwargs)
@@ -45,16 +103,17 @@ def run_in_process(target, **kwargs):
 
 
 
-@app.post("/api/surveys/import")
+@api.post("/api/surveys/import")
 async def import_survey(
-    survey_name: str = Form(..., description="'Boeung Sne - Zone 2'"),
+    survey_name: str = Form(..., description="e.g. 'Zone 2 - 2026 Q1'"),
     survey_type: str = Form(default="drone", description="Survey type: 'drone' or 'acoustic'"),
     survey_date: Optional[str] = Form(default=None, description="Survey date in YYYY-MM-DD format"),
     orthomosaics: list[UploadFile] = File(default=[], description="Orthomosaic GeoTIFF files"),
     audio_files: list[UploadFile] = File(default=[], description="Audio files (.wav, .mp3, .flac)"),
     audio_aru_mapping: Optional[str] = Form(default=None, description="JSON mapping of audio file index to ARU ID"),
     background_tasks: BackgroundTasks = BackgroundTasks(),
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
 ):
     # Validate at least one file is provided AND exclusive
     if not orthomosaics and not audio_files:
@@ -109,38 +168,48 @@ async def import_survey(
     
     # 1. Create Survey entry in DB with explicit type and date
     new_survey = Survey(
-        name=survey_name, 
-        type=survey_type, 
+        colony_id=colony.id,
+        name=survey_name,
+        type=survey_type,
         date=parsed_date,
         status="pending"
     )
     session.add(new_survey)
     session.commit()
     session.refresh(new_survey)
-    
+
     # 2. Create upload directory for this survey
     upload_dir = Path("static/uploads") / f"survey_{new_survey.id}"
     upload_dir.mkdir(parents=True, exist_ok=True)
-    
+
     uploaded_files = {"orthomosaics": [], "audio": []}
-    
+
     # Process orthomosaic files
     for file in orthomosaics:
         # Validate file type
         if not file.filename.lower().endswith(('.tif', '.tiff')):
             continue
-            
+
         safe_filename = file.filename.replace(" ", "_")
+
+        # Write incoming upload to temp file, then route through storage abstraction.
+        with tempfile.NamedTemporaryFile(delete=False, suffix=safe_filename) as tmp:
+            shutil.copyfileobj(file.file, tmp)
+            tmp_path = tmp.name
+
+        rel_path = f"uploads/survey_{new_survey.id}/{safe_filename}"
+        # Local-mode pipeline still expects a real path on disk — Phase D will fully
+        # decouple. For now we mirror the legacy disk write so the pipeline keeps working.
         input_path = str(upload_dir / safe_filename)
-        
-        # Save file
-        with open(input_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
-        # Create MediaAsset entry
+        if storage_module.STORAGE_BACKEND == "local":
+            shutil.copyfile(tmp_path, input_path)
+        stored_path = storage_module.upload(colony.slug, rel_path, tmp_path)
+        os.unlink(tmp_path)
+
+        # Create MediaAsset entry — file_path is now the relative path returned by storage.
         media_asset = MediaAsset(
             survey_id=new_survey.id,
-            file_path=input_path,
+            file_path=stored_path,
             is_processed=False,
             status="Processing"
         )
@@ -151,38 +220,55 @@ async def import_survey(
         # Prepare tile output directory
         tile_dir = Path("static/tiles") / f"survey_{new_survey.id}"
         tile_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Trigger drone processing pipeline in background
-        background_tasks.add_task(
-            run_in_process,
-            target=execute_pipeline_task,
-            survey_id=new_survey.id,
-            input_path=input_path,
-            output_dir=str(tile_dir)
-        )
-        
+
+        if PIPELINE_MODE == "cloudrun":
+            # Cloud Run Job runs in its own container with its own lifecycle —
+            # it survives this request finishing.
+            _trigger_cloudrun_pipeline(
+                survey_id=new_survey.id,
+                pipeline_type="drone",
+                input_path=stored_path,
+            )
+        else:
+            # Local dev: still uses BackgroundTasks (multiprocessing)
+            background_tasks.add_task(
+                run_in_process,
+                target=execute_pipeline_task,
+                survey_id=new_survey.id,
+                input_path=input_path,
+                output_dir=str(tile_dir)
+            )
+
         uploaded_files["orthomosaics"].append({
             "filename": safe_filename,
             "asset_id": media_asset.id
         })
-    
+
     # Create audio subdirectory
     audio_dir = upload_dir / "audio"
     audio_dir.mkdir(exist_ok=True)
-    
+
     # Process audio files
     for index, file in enumerate(audio_files):
         # Validate file type
         if not file.filename.lower().endswith(('.wav', '.mp3', '.flac')):
             continue
-            
+
         safe_filename = file.filename.replace(" ", "_")
+
+        # Write incoming upload to temp file, then route through storage abstraction.
+        with tempfile.NamedTemporaryFile(delete=False, suffix=safe_filename) as tmp:
+            shutil.copyfileobj(file.file, tmp)
+            tmp_path = tmp.name
+
+        rel_path = f"uploads/survey_{new_survey.id}/audio/{safe_filename}"
+        # Local-mode pipeline still expects a real path on disk — Phase D will fully decouple.
         input_path = str(audio_dir / safe_filename)
-        
-        # Save file
-        with open(input_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
+        if storage_module.STORAGE_BACKEND == "local":
+            shutil.copyfile(tmp_path, input_path)
+        stored_path = storage_module.upload(colony.slug, rel_path, tmp_path)
+        os.unlink(tmp_path)
+
         # Get ARU ID for this audio file
         file_aru_id = aru_mapping.get(index)
         
@@ -199,15 +285,24 @@ async def import_survey(
         # BirdNetPipeline likely handles it.
         # I will leave as is but check Pipeline later.
         
-        # Trigger acoustic processing pipeline in background
-        background_tasks.add_task(
-            run_in_process,
-            target=execute_acoustic_pipeline_task,
-            survey_id=new_survey.id,
-            input_path=input_path,
-            aru_id=file_aru_id
-        )
-        
+        if PIPELINE_MODE == "cloudrun":
+            # Cloud Run Job — separate container, survives this request finishing.
+            _trigger_cloudrun_pipeline(
+                survey_id=new_survey.id,
+                pipeline_type="birdnet",
+                input_path=stored_path,
+                aru_id=file_aru_id,
+            )
+        else:
+            # Local dev: still uses BackgroundTasks (multiprocessing)
+            background_tasks.add_task(
+                run_in_process,
+                target=execute_acoustic_pipeline_task,
+                survey_id=new_survey.id,
+                input_path=input_path,
+                aru_id=file_aru_id
+            )
+
         uploaded_files["audio"].append({
             "filename": safe_filename
         })
@@ -311,10 +406,14 @@ def execute_acoustic_pipeline_task(survey_id: int, input_path: str, aru_id: Opti
                 session.commit()
 
 
-@app.get("/api/surveys/{survey_id}/status")
-def get_survey_status(survey_id: int, session: Session = Depends(get_session)):
+@api.get("/api/surveys/{survey_id}/status")
+def get_survey_status(
+    survey_id: int,
+    session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
+):
     survey = session.get(Survey, survey_id)
-    if not survey:
+    if not survey or survey.colony_id != colony.id:
         raise HTTPException(status_code=404, detail="Survey not found")
     
     # Count how many assets are processed
@@ -340,11 +439,15 @@ def get_survey_status(survey_id: int, session: Session = Depends(get_session)):
         "is_complete": (total_assets > 0 and total_assets == processed)
     }
 
-@app.get("/api/surveys/{survey_id}")
-def get_survey_details(survey_id: int, session: Session = Depends(get_session)):
+@api.get("/api/surveys/{survey_id}")
+def get_survey_details(
+    survey_id: int,
+    session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
+):
     """Get metadata for a specific survey"""
     survey = session.get(Survey, survey_id)
-    if not survey:
+    if not survey or survey.colony_id != colony.id:
         raise HTTPException(status_code=404, detail="Survey not found")
     
     # Calculate bounds similar to list endpoint
@@ -390,7 +493,7 @@ def get_survey_details(survey_id: int, session: Session = Depends(get_session)):
         "date": survey.date,
         "type": survey.type,
         "status": survey.status,
-        "area": "Boeung Sne Restricted Zone", # Placeholder or derived
+        "area": f"{survey.colony.name} Restricted Zone" if survey.colony else None,
         "notes": "Survey data available.",
         "bounds": bounds or {
             "min_lat": None,
@@ -402,15 +505,19 @@ def get_survey_details(survey_id: int, session: Session = Depends(get_session)):
     }
 
 
-@app.delete("/api/surveys/{survey_id}")
-def delete_survey(survey_id: int, session: Session = Depends(get_session)):
+@api.delete("/api/surveys/{survey_id}")
+def delete_survey(
+    survey_id: int,
+    session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
+):
     """
     Permanently delete a survey and all linked data:
     media assets, visual detections, acoustic detections,
     calibration windows, and tile files on disk.
     """
     survey = session.get(Survey, survey_id)
-    if not survey:
+    if not survey or survey.colony_id != colony.id:
         raise HTTPException(status_code=404, detail="Survey not found")
 
     # Collect asset IDs before deleting anything
@@ -458,31 +565,42 @@ def delete_survey(survey_id: int, session: Session = Depends(get_session)):
 
 # --- ARU Endpoints ---
 
-@app.get("/api/arus")
-def get_arus(session: Session = Depends(get_session)):
-    """Get all ARU locations"""
-    arus = session.exec(select(ARU)).all()
+@api.get("/api/arus")
+def get_arus(
+    session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
+):
+    """Get all ARU locations for the active colony."""
+    arus = session.exec(select(ARU).where(ARU.colony_id == colony.id)).all()
     return arus
 
 
-@app.post("/api/arus")
+@api.post("/api/arus")
 def create_aru(
     name: str = Form(...),
     lat: float = Form(...),
     lon: float = Form(...),
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
 ):
-    """Create a new ARU location"""
-    new_aru = ARU(name=name, lat=lat, lon=lon)
+    """Create a new ARU location scoped to the active colony."""
+    new_aru = ARU(colony_id=colony.id, name=name, lat=lat, lon=lon)
     session.add(new_aru)
     session.commit()
     session.refresh(new_aru)
     return new_aru
 
 
-@app.get("/api/surveys")
-def get_surveys(session: Session = Depends(get_session)):
-    surveys = session.exec(select(Survey).order_by(Survey.date.desc())).all()
+@api.get("/api/surveys")
+def get_surveys(
+    session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
+):
+    surveys = session.exec(
+        select(Survey)
+        .where(Survey.colony_id == colony.id)
+        .order_by(Survey.date.desc())
+    ).all()
     
     results = []
     for s in surveys:
@@ -528,14 +646,18 @@ def get_surveys(session: Session = Depends(get_session)):
     return results
 
 
-@app.get("/api/surveys/{survey_id}/map_data")
-def get_survey_map_data(survey_id: int, session: Session = Depends(get_session)):
+@api.get("/api/surveys/{survey_id}/map_data")
+def get_survey_map_data(
+    survey_id: int,
+    session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
+):
     """
     Returns a list of detections with their estimated lat/lon based on the MediaAsset bounds.
     Scale: simple interpolation for now.
     """
     survey = session.get(Survey, survey_id)
-    if not survey:
+    if not survey or survey.colony_id != colony.id:
         raise HTTPException(status_code=404, detail="Survey not found")
 
     detections_data = []
@@ -600,26 +722,28 @@ def get_survey_map_data(survey_id: int, session: Session = Depends(get_session))
     return detections_data
 
 
-@app.get("/api/stats/daily")
+@api.get("/api/stats/daily")
 def get_daily_activity(
     session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
     days: int = 7,
     survey_id: Optional[int] = None
 ):
     """
     Returns total visual detections grouped by day.
     """
-    
+
     base_query = (
         select(func.date(Survey.date), func.count(VisualDetection.id))
         .join(MediaAsset, Survey.id == MediaAsset.survey_id)
         .join(VisualDetection, MediaAsset.id == VisualDetection.asset_id)
+        .where(Survey.colony_id == colony.id)
     )
-    
+
     # Filter
     if survey_id:
         base_query = base_query.where(Survey.id == survey_id)
-    
+
     # Date filter
     # If using sqlite func.date, be careful with comparison
     cutoff_date = date.today() - timedelta(days=days)
@@ -649,9 +773,10 @@ def get_daily_activity(
     return data[::-1]
 
 
-@app.get("/api/stats/acoustic")
+@api.get("/api/stats/acoustic")
 def get_acoustic_activity(
     session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
     days: int = 7,
     survey_id: Optional[int] = None
 ):
@@ -664,6 +789,7 @@ def get_acoustic_activity(
         select(AcousticDetection.class_name, func.count(AcousticDetection.id))
         .join(MediaAsset, AcousticDetection.asset_id == MediaAsset.id)
         .join(Survey, MediaAsset.survey_id == Survey.id)
+        .where(Survey.colony_id == colony.id)
     )
 
     if survey_id:
@@ -687,9 +813,10 @@ def get_acoustic_activity(
     return data
 
 
-@app.get("/api/stats/species")
+@api.get("/api/stats/species")
 def get_species_stats(
     session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
     days: int = 7,
     survey_id: Optional[int] = None
 ):
@@ -701,8 +828,9 @@ def get_species_stats(
         select(VisualDetection.class_name, func.count(VisualDetection.id))
         .join(MediaAsset, VisualDetection.asset_id == MediaAsset.id)
         .join(Survey, MediaAsset.survey_id == Survey.id)
+        .where(Survey.colony_id == colony.id)
     )
-    
+
     if survey_id:
         base_query = base_query.where(Survey.id == survey_id)
     
@@ -724,19 +852,25 @@ def get_species_stats(
     return data
 
 
-@app.get("/api/stats/overview")
+@api.get("/api/stats/overview")
 def get_overview_stats(
     session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
     days: int = 7,
     survey_id: Optional[int] = None
 ):
     """
     Returns high-level aggregate stats.
     """
-    
+
     # helper for constructing query
     def get_filtered_scalar(field):
-        q = select(field).join(MediaAsset, VisualDetection.asset_id == MediaAsset.id).join(Survey, MediaAsset.survey_id == Survey.id)
+        q = (
+            select(field)
+            .join(MediaAsset, VisualDetection.asset_id == MediaAsset.id)
+            .join(Survey, MediaAsset.survey_id == Survey.id)
+            .where(Survey.colony_id == colony.id)
+        )
         if survey_id:
             q = q.where(Survey.id == survey_id)
         q = q.where(Survey.date >= (date.today() - timedelta(days=days)))
@@ -747,35 +881,38 @@ def get_overview_stats(
         select(func.count(VisualDetection.id))
         .join(MediaAsset, VisualDetection.asset_id == MediaAsset.id)
         .join(Survey, MediaAsset.survey_id == Survey.id)
+        .where(Survey.colony_id == colony.id)
         .where(Survey.date >= (date.today() - timedelta(days=days)))
     )
     if survey_id:
         total_q = total_q.where(Survey.id == survey_id)
-        
+
     total_detections = session.exec(total_q).one()
-    
+
     # Species
     species_q = (
         select(func.count(func.distinct(VisualDetection.class_name)))
         .join(MediaAsset, VisualDetection.asset_id == MediaAsset.id)
         .join(Survey, MediaAsset.survey_id == Survey.id)
+        .where(Survey.colony_id == colony.id)
         .where(Survey.date >= (date.today() - timedelta(days=days)))
     )
     if survey_id:
         species_q = species_q.where(Survey.id == survey_id)
-        
+
     unique_species = session.exec(species_q).one()
-    
+
     # Conf
     conf_q = (
         select(func.avg(VisualDetection.confidence))
         .join(MediaAsset, VisualDetection.asset_id == MediaAsset.id)
         .join(Survey, MediaAsset.survey_id == Survey.id)
+        .where(Survey.colony_id == colony.id)
         .where(Survey.date >= (date.today() - timedelta(days=days)))
     )
     if survey_id:
         conf_q = conf_q.where(Survey.id == survey_id)
-        
+
     avg_conf = session.exec(conf_q).one()
     
     # Area Calculation (hectares)
@@ -791,6 +928,7 @@ def get_overview_stats(
     tiles_q = (
         select(func.count(MediaAsset.id))
         .join(Survey, MediaAsset.survey_id == Survey.id)
+        .where(Survey.colony_id == colony.id)
         .where(MediaAsset.is_processed == True)
         .where(Survey.date >= (date.today() - timedelta(days=days)))
     )
@@ -808,24 +946,29 @@ def get_overview_stats(
         "storage_used": f"{area_hectares:.2f} ha" # Re-purposing this field or adding new
     }
 
-@app.get("/api/detections/visual")
+@api.get("/api/detections/visual")
 def get_visual_detections(
     session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
     days: int = 7,
     survey_ids: Optional[str] = None # comma separated, e.g "1,2,3"
 ):
     """
     Returns individual visual detections for the map/inspector.
     """
+    # Request-scoped dedupe cache so each unique storage path is signed at most once.
+    signed_url_cache: dict = {}
+
     cutoff_date = date.today() - timedelta(days=days)
-    
+
     query = (
         select(VisualDetection, MediaAsset, Survey)
         .join(MediaAsset, VisualDetection.asset_id == MediaAsset.id)
         .join(Survey, MediaAsset.survey_id == Survey.id)
+        .where(Survey.colony_id == colony.id)
         .where(Survey.date >= cutoff_date)
     )
-    
+
     if survey_ids:
         try:
             ids = [int(x) for x in survey_ids.split(",") if x.strip()]
@@ -835,12 +978,12 @@ def get_visual_detections(
             pass # Ignore invalid format
 
     results = session.exec(query).all()
-    
+
     data = []
-    
+
     # Pre-define IMG dims
     IMG_W, IMG_H = 1280, 1280
-    
+
     for det, asset, survey in results:
         # Interpolate Lat/Lon
         try:
@@ -849,27 +992,25 @@ def get_visual_detections(
 
             lat_diff = asset.lat_br - asset.lat_tl
             lon_diff = asset.lon_br - asset.lon_tl
-            
+
             bbox_list = json.loads(det.bbox_json)
             # YOLO Format: [center_x, center_y, width, height] (Normalized 0-1)
             cx, cy, w, h = bbox_list
-            
+
             # Convert to Top-Left for bounding box drawing (if needed) but keep center for geo
             # cx is normalized (0-1)
-            
+
             # Interpolate Geo-Coordinates based on Center of Box
             det_lat = asset.lat_tl + (cy * lat_diff)
             det_lon = asset.lon_tl + (cx * lon_diff)
-            
-            # Construct Image URL
-            # stored path is likely "static/tiles/survey_ID/..."
-            img_path = asset.file_path
-            if not img_path.startswith("/"):
-                img_path = "/" + img_path
-            
-            # Ensure it starts with /static if the stored path is relative like "static/..."
-            # If stored as "static/tiles...", and we access via "/static/tiles...", we need leading /
-            
+
+            # Resolve the asset's stored path to a colony-scoped URL (V4 signed in GCS,
+            # plain /static path in local). Cache shared across this response so each
+            # unique blob is signed at most once.
+            image_url = storage_module.url_for(
+                colony.slug, asset.file_path, cache=signed_url_cache
+            )
+
             data.append({
                 "id": f"vis-{det.id}",
                 "species": det.class_name,
@@ -877,21 +1018,22 @@ def get_visual_detections(
                 "lat": det_lat,
                 "lon": det_lon,
                 "bbox": {"cx": cx, "cy": cy, "w": w, "h": h}, # Send standard YOLO format
-                "imageUrl": img_path, 
+                "imageUrl": image_url,
                 "timestamp": survey.date.isoformat(),
                 "survey_id": survey.id,
                 "survey_name": survey.name,
-                "asset_id": asset.id 
+                "asset_id": asset.id
             })
-            
+
         except Exception as e:
             continue
-            
+
     return data
 
-@app.get("/api/detections/acoustic")
+@api.get("/api/detections/acoustic")
 def get_acoustic_detections(
     session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
     days: int = 7,
     survey_ids: Optional[str] = None # comma separated
 ):
@@ -899,11 +1041,12 @@ def get_acoustic_detections(
     Returns individual acoustic detections for the map/inspector.
     """
     cutoff_date = date.today() - timedelta(days=days)
-    
+
     query = (
         select(AcousticDetection, MediaAsset, Survey)
         .join(MediaAsset, AcousticDetection.asset_id == MediaAsset.id)
         .join(Survey, MediaAsset.survey_id == Survey.id)
+        .where(Survey.colony_id == colony.id)
         .where(Survey.date >= cutoff_date)
     )
     
@@ -948,14 +1091,19 @@ def get_acoustic_detections(
 
 # --- New Endpoints for Charts ---
 
-@app.get("/api/surveys/{survey_id}/arus")
+@api.get("/api/surveys/{survey_id}/arus")
 def get_survey_arus(
     survey_id: int,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
 ):
     """
     Returns list of ARU (Audio) assets for a specific survey.
     """
+    survey = session.get(Survey, survey_id)
+    if not survey or survey.colony_id != colony.id:
+        raise HTTPException(status_code=404, detail="Survey not found")
+
     # Find assets with .wav extension indicating ARU
     assets = session.exec(
         select(MediaAsset)
@@ -975,21 +1123,23 @@ def get_survey_arus(
         
     return arus
 
-@app.get("/api/acoustic/activity/hourly")
+@api.get("/api/acoustic/activity/hourly")
 def get_hourly_activity(
     survey_id: int,
     aru_id: Optional[int] = None,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
 ):
     """
-    Returns hourly aggregation of acoustic detections.
+    Returns hourly aggregation of acoustic detections, scoped to the active colony.
     """
-    # Fetch detections for this asset
+    # Fetch detections for this asset, scoped to the active colony.
     query = select(AcousticDetection, Survey)\
         .join(MediaAsset, AcousticDetection.asset_id == MediaAsset.id)\
         .join(Survey, MediaAsset.survey_id == Survey.id)\
-        .where(Survey.id == survey_id)
-        
+        .where(Survey.id == survey_id)\
+        .where(Survey.colony_id == colony.id)
+
     if aru_id:
         query = query.where(MediaAsset.id == aru_id)
         
@@ -1021,25 +1171,32 @@ def get_hourly_activity(
     return chart_data
 
 
-@app.get("/api/arus/{aru_id}/detections")
+@api.get("/api/arus/{aru_id}/detections")
 def get_aru_detections(
     aru_id: int,
     days: int = 7,
     survey_ids: Optional[str] = None,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
 ):
     """
     Returns all acoustic detections for a specific ARU.
     Respects date filter and survey filter.
     """
+    # Verify ARU belongs to this colony — prevents cross-colony leak via known ID.
+    aru = session.get(ARU, aru_id)
+    if not aru or aru.colony_id != colony.id:
+        raise HTTPException(status_code=404, detail="ARU not found")
+
     cutoff_date = date.today() - timedelta(days=days)
-    
-    # Build query
+
+    # Build query — also scope joined Survey to this colony for defense in depth.
     query = (
         select(AcousticDetection, MediaAsset, Survey)
         .join(MediaAsset, AcousticDetection.asset_id == MediaAsset.id)
         .join(Survey, MediaAsset.survey_id == Survey.id)
         .where(MediaAsset.aru_id == aru_id)
+        .where(Survey.colony_id == colony.id)
         .where(Survey.date >= cutoff_date)
     )
     
@@ -1071,30 +1228,32 @@ def get_aru_detections(
     
     return detections
 
-@app.get("/api/stats/species_history")
+@api.get("/api/stats/species_history")
 def get_species_history(
     species_name: str,
     days: int = 7,
     type: str = "visual",
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
 ):
     """
     Returns daily counts for a specific species.
     """
     # Fix: To include today, we need to shift the window.
-    # range(days) means we get N days. 
+    # range(days) means we get N days.
     # If we want the last one to be today, start = today - (days - 1)
     cutoff_date = date.today() - timedelta(days=days - 1)
-    
+
     if type == "visual":
         Model = VisualDetection
     else:
         Model = AcousticDetection
-        
+
     query = (
         select(func.date(Survey.date), func.count(Model.id))
         .join(MediaAsset, Model.asset_id == MediaAsset.id)
         .join(Survey, MediaAsset.survey_id == Survey.id)
+        .where(Survey.colony_id == colony.id)
         .where(Model.class_name == species_name)
         .where(Survey.date >= cutoff_date)
         .group_by(func.date(Survey.date))
@@ -1129,23 +1288,31 @@ def get_species_history(
     return chart_data
 
 
-@app.get("/api/species_list")
+@api.get("/api/species_list")
 def get_species_list(
     type: str = "visual",
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
 ):
-    """Returns list of all unique species detected"""
+    """Returns list of all unique species detected within the active colony."""
     if type == "visual":
         Model = VisualDetection
     else:
         Model = AcousticDetection
-        
-    query = select(func.distinct(Model.class_name)).order_by(Model.class_name)
+
+    # Join through MediaAsset -> Survey to enforce colony scope.
+    query = (
+        select(func.distinct(Model.class_name))
+        .join(MediaAsset, Model.asset_id == MediaAsset.id)
+        .join(Survey, MediaAsset.survey_id == Survey.id)
+        .where(Survey.colony_id == colony.id)
+        .order_by(Model.class_name)
+    )
     results = session.exec(query).all()
     return results
 
 
-@app.get("/api/settings")
+@api.get("/api/settings")
 def get_settings(session: Session = Depends(get_session)):
     settings = session.get(SystemSettings, 1)
     if not settings:
@@ -1155,7 +1322,7 @@ def get_settings(session: Session = Depends(get_session)):
         session.refresh(settings)
     return settings
 
-@app.post("/api/settings")
+@api.post("/api/settings")
 def update_settings(new_settings: SystemSettings, session: Session = Depends(get_session)):
     settings = session.get(SystemSettings, 1)
     if not settings:
@@ -1170,7 +1337,7 @@ def update_settings(new_settings: SystemSettings, session: Session = Depends(get
     session.refresh(settings)
     return settings
 
-@app.post("/api/settings/upload-model")
+@api.post("/api/settings/upload-model")
 async def upload_model_weights(
     file: UploadFile = File(...),
     type: str = Form(...), # 'acoustic' or 'visual'
@@ -1227,45 +1394,46 @@ from app.calibration import (
 )
 
 
-@app.get("/api/settings/species_colors")
-def get_species_colors_mapping(session: Session = Depends(get_session)):
+@api.get("/api/settings/species_colors")
+def get_species_colors_mapping(
+    session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
+):
     """
-    Returns the species-to-color mapping.
+    Returns the species-to-color mapping for the active colony.
     """
-    mapping = get_species_color_mapping(session)
+    mapping = get_species_color_mapping(colony.id, session)
     return {"mapping": mapping}
 
 
-@app.post("/api/settings/species_colors")
+@api.post("/api/settings/species_colors")
 def update_species_colors_mapping(
     mapping: dict,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
 ):
     """
-    Updates the species-to-color mapping.
+    Updates the species-to-color mapping on the active Colony.
     Expected format: {"white": ["Great Egret", ...], "black": ["Oriental Darter", ...]}
     """
-    settings = session.get(SystemSettings, 1)
-    if not settings:
-        settings = SystemSettings(id=1)
-    
-    settings.species_color_mapping = json.dumps(mapping)
-    session.add(settings)
+    colony.species_color_mapping = json.dumps(mapping)
+    session.add(colony)
     session.commit()
-    session.refresh(settings)
-    
+    session.refresh(colony)
+
     return {"message": "Species color mapping updated", "mapping": mapping}
 
 
-@app.get("/api/fusion/overlapping")
+@api.get("/api/fusion/overlapping")
 def get_overlapping_arus(
     survey_id: int,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
 ):
     """
-    Returns ARUs that overlap with the given survey's bounding box.
+    Returns ARUs (within the active colony) that overlap with the given survey's bounding box.
     """
-    arus = find_overlapping_arus(session, survey_id)
+    arus = find_overlapping_arus(colony.id, session, survey_id)
     return {
         "survey_id": survey_id,
         "overlapping_arus": [
@@ -1275,36 +1443,79 @@ def get_overlapping_arus(
     }
 
 
-@app.get("/api/fusion/report")
+@api.get("/api/fusion/report")
 def get_fusion_report(
     visual_survey_id: int,
     acoustic_survey_id: Optional[int] = None,
     aru_id: Optional[int] = None,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
 ):
     """
-    Generate a combined analysis report for overlapping survey/ARU data.
-    
+    Generate a combined analysis report for overlapping survey/ARU data
+    within the active colony.
+
     Args:
         visual_survey_id: The drone/visual survey ID (required)
         acoustic_survey_id: The acoustic survey ID (optional)
         aru_id: The ARU ID for acoustic detections (optional, used if acoustic_survey_id not provided)
     """
-    report = generate_fusion_report(session, visual_survey_id, acoustic_survey_id, aru_id)
+    report = generate_fusion_report(
+        colony.id, session, visual_survey_id, acoustic_survey_id, aru_id
+    )
     return report
 
 
-@app.post("/api/calibration/windows/rebuild")
+@api.get("/api/fusion/bayesian")
+def get_bayesian_fusion(
+    visual_survey_id: int,
+    aru_ids: Optional[str] = None,
+    spatial_decay_m: float = 100.0,
+    temporal_decay_hours: float = 6.0,
+    smoothing: float = 0.5,
+    reclassify_openbill: bool = False,
+    session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
+):
+    """
+    Bayesian species composition estimation, scoped to the active colony.
+
+    Fuses drone visual detections with acoustic data using a
+    Dirichlet-Multinomial model with spatial-temporal weighting.
+    """
+    from app.bayesian_fusion import bayesian_fusion_report
+
+    parsed_aru_ids = None
+    if aru_ids:
+        parsed_aru_ids = [int(x.strip()) for x in aru_ids.split(",")]
+
+    return bayesian_fusion_report(
+        colony_id=colony.id,
+        session=session,
+        visual_survey_id=visual_survey_id,
+        aru_ids=parsed_aru_ids,
+        decay_m=spatial_decay_m,
+        decay_hours=temporal_decay_hours,
+        smoothing=smoothing,
+        reclassify_openbill=reclassify_openbill,
+    )
+
+
+@api.post("/api/calibration/windows/rebuild")
 def rebuild_windows(
     max_days_apart: int = Query(default=14, ge=0, le=120),
     buffer_meters: float = Query(default=150.0, ge=0.0, le=5000.0),
     min_acoustic_calls: int = Query(default=1, ge=0, le=100000),
     session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
 ):
     """
-    Rebuilds paired acoustic/drone windows used for call-rate calibration.
+    Rebuilds calibration windows.
+    Each acoustic survey/ARU is paired to one best drone survey, and
+    drone density is computed locally inside the ARU radius.
     """
     return rebuild_calibration_windows(
+        colony_id=colony.id,
         session=session,
         max_days_apart=max_days_apart,
         buffer_meters=buffer_meters,
@@ -1312,72 +1523,81 @@ def rebuild_windows(
     )
 
 
-@app.get("/api/calibration/windows")
+@api.get("/api/calibration/windows")
 def get_calibration_windows(
     min_calls: int = Query(default=0, ge=0, le=100000),
     limit: int = Query(default=200, ge=1, le=2000),
     session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
 ):
     """
-    Returns paired calibration windows for inspection and downstream analysis.
+    Returns calibration windows with local ARU-area drone metrics.
     """
-    return list_calibration_windows(session=session, min_calls=min_calls, limit=limit)
+    return list_calibration_windows(
+        colony_id=colony.id, session=session, min_calls=min_calls, limit=limit
+    )
 
 
-@app.get("/api/calibration/summary")
+@api.get("/api/calibration/summary")
 def get_calibration_summary(
     min_calls: int = Query(default=1, ge=0, le=100000),
     session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
 ):
     """
-    Returns a simple calibration factor from current windows.
+    Returns a simple calibration factor from current local-density windows.
     """
-    return calibration_curve_summary(session=session, min_calls=min_calls)
+    return calibration_curve_summary(
+        colony_id=colony.id, session=session, min_calls=min_calls
+    )
 
 
-@app.get("/api/calibration/features")
+@api.get("/api/calibration/features")
 def get_calibration_features(
     min_calls: int = Query(default=1, ge=0, le=100000),
     top_species: int = Query(default=5, ge=0, le=20),
     session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
 ):
     """
     Returns feature rows used for calibration (including species-specific rates).
     """
     return build_calibration_feature_rows(
-        session=session, min_calls=min_calls, top_species=top_species
+        colony_id=colony.id, session=session, min_calls=min_calls, top_species=top_species
     )
 
 
-@app.get("/api/calibration/backtest")
+@api.get("/api/calibration/backtest")
 def get_calibration_backtest(
     min_calls: int = Query(default=1, ge=0, le=100000),
     top_species: int = Query(default=5, ge=0, le=20),
     session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
 ):
     """
     Grouped backtest report for linear vs non-linear calibration models.
     """
     return calibration_backtest_report(
-        session=session, min_calls=min_calls, top_species=top_species
+        colony_id=colony.id, session=session, min_calls=min_calls, top_species=top_species
     )
 
 
-@app.get("/api/calibration/model")
+@api.get("/api/calibration/model")
 def get_calibration_model_summary(
     min_calls: int = Query(default=1, ge=0, le=100000),
     top_species: int = Query(default=5, ge=0, le=20),
     session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
 ):
     """
     Returns fitted model coefficients and training metrics.
     """
     return calibration_train_summary(
-        session=session, min_calls=min_calls, top_species=top_species
+        colony_id=colony.id, session=session, min_calls=min_calls, top_species=top_species
     )
 
 
-@app.get("/api/calibration/predict")
+@api.get("/api/calibration/predict")
 def predict_calibration_density(
     acoustic_survey_id: int = Query(..., ge=1),
     aru_id: int = Query(..., ge=1),
@@ -1385,11 +1605,13 @@ def predict_calibration_density(
     min_calls: int = Query(default=1, ge=0, le=100000),
     top_species: int = Query(default=5, ge=0, le=20),
     session: Session = Depends(get_session),
+    colony: Colony = Depends(get_colony),
 ):
     """
     Estimates drone-equivalent density from ARU acoustic activity.
     """
     return calibration_predict_density(
+        colony_id=colony.id,
         session=session,
         acoustic_survey_id=acoustic_survey_id,
         aru_id=aru_id,
@@ -1401,3 +1623,17 @@ def predict_calibration_density(
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+
+# Register auth-protected router (all /api/* routes except /api/health).
+app.include_router(api)
+
+# Colony CRUD lives in its own router with its own auth gate.
+from app.colonies import router as colonies_router
+app.include_router(colonies_router, dependencies=[Depends(get_current_user)])
+
+# Serve the built SPA from / (production). In dev, Vite serves this separately on :5173.
+# This mount MUST be absolute last — Starlette processes routes in registration order,
+# so any route/mount registered after this would be shadowed by the SPA catch-all.
+SPA_DIR = BASE_DIR / "static" / "dist"
+if SPA_DIR.exists():
+    app.mount("/", StaticFiles(directory=SPA_DIR, html=True), name="spa")

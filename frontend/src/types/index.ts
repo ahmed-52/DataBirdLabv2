@@ -113,6 +113,15 @@ export interface CalibrationBacktestReport {
     }
 }
 
+export interface SurveyMapDetection {
+    id: number
+    lat: number
+    lon: number
+    class: string
+    confidence: number
+    asset_id: number
+}
+
 // Filter state type
 export interface FilterState {
     mode: "7d" | "30d"
